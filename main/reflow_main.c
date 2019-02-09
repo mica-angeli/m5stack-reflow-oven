@@ -134,18 +134,18 @@ void app_main()
     gpio_set_level(BOTTOM_HEATER_PIN, bottom_level);
 
     _fg = TFT_WHITE;
-    TFT_print("TOP H. = ", 10, 0);
+    TFT_print("TOP H. = ", 10, 5);
 
     _fg = gpio_get_level(TOP_HEATER_PIN) ? TFT_RED : TFT_WHITE;
     snprintf(tmp_buff, BUFFER_SIZE, "%s", gpio_get_level(TOP_HEATER_PIN) ? "ON " : "OFF");
-    TFT_print(tmp_buff, LASTX, 0);
+    TFT_print(tmp_buff, LASTX, LASTY);
 
     _fg = TFT_WHITE;
-    TFT_print("   BOT. H. = ", LASTX, 0);
+    TFT_print("   BOT. H. = ", LASTX, LASTY);
 
     _fg = gpio_get_level(BOTTOM_HEATER_PIN) ? TFT_RED : TFT_WHITE;
     snprintf(tmp_buff, BUFFER_SIZE, "%s", gpio_get_level(BOTTOM_HEATER_PIN) ? "ON " : "OFF");
-    TFT_print(tmp_buff, LASTX, 0);
+    TFT_print(tmp_buff, LASTX, LASTY);
 
     top_level = top_level ? 0 : 1;
     bottom_level = bottom_level ? 0 : 1;
