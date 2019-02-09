@@ -121,7 +121,7 @@ void app_main()
   TFT_setRotation(LANDSCAPE);
   const int tempy = TFT_getfontheight() + 8;
 
-  TFT_setFont(COMIC24_FONT, NULL);
+  TFT_setFont(DEJAVU18_FONT, NULL);
 
   _fg = TFT_WHITE;
 
@@ -133,13 +133,23 @@ void app_main()
     gpio_set_level(TOP_HEATER_PIN, top_level);
     gpio_set_level(BOTTOM_HEATER_PIN, bottom_level);
 
-    snprintf(tmp_buff, BUFFER_SIZE, "GPIO[%d] = %d\n", TOP_HEATER_PIN, gpio_get_level(TOP_HEATER_PIN));
-    TFT_print(tmp_buff, CENTER, (dispWin.y2-dispWin.y1)/2 - tempy);
-    snprintf(tmp_buff, BUFFER_SIZE, "GPIO[%d] = %d\n", BOTTOM_HEATER_PIN, gpio_get_level(BOTTOM_HEATER_PIN));
-    TFT_print(tmp_buff, CENTER, LASTY);
+    _fg = TFT_WHITE;
+    TFT_print("TOP H. = ", 10, 0);
+
+    _fg = gpio_get_level(TOP_HEATER_PIN) ? TFT_RED : TFT_WHITE;
+    snprintf(tmp_buff, BUFFER_SIZE, "%s", gpio_get_level(TOP_HEATER_PIN) ? "ON " : "OFF");
+    TFT_print(tmp_buff, LASTX, 0);
+
+    _fg = TFT_WHITE;
+    TFT_print("   BOT. H. = ", LASTX, 0);
+
+    _fg = gpio_get_level(BOTTOM_HEATER_PIN) ? TFT_RED : TFT_WHITE;
+    snprintf(tmp_buff, BUFFER_SIZE, "%s", gpio_get_level(BOTTOM_HEATER_PIN) ? "ON " : "OFF");
+    TFT_print(tmp_buff, LASTX, 0);
 
     top_level = top_level ? 0 : 1;
     bottom_level = bottom_level ? 0 : 1;
+
     vTaskDelay(2000 / portTICK_RATE_MS);
   }
 }
