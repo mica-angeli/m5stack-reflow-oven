@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "driver/gpio.h"
 #include "tftspi.h"
 #include "tft.h"
 
@@ -10,6 +11,12 @@
 // Define which spi bus to use TFT_VSPI_HOST or TFT_HSPI_HOST
 #define SPI_BUS TFT_HSPI_HOST
 // ==========================================================
+
+#define BUFFER_SIZE 128
+
+#define TOP_HEATER_PIN 16
+#define BOTTOM_HEATER_PIN 17
+#define GPIO_OUTPUT_PIN_SEL  ((1ULL<<TOP_HEATER_PIN) | (1ULL<<BOTTOM_HEATER_PIN))
 
 static unsigned int rand_interval(unsigned int min, unsigned int max)
 {
@@ -77,12 +84,29 @@ void tft_setup() {
   spi_lobo_set_speed(spi, DEFAULT_SPI_CLOCK);
 }
 
+void gpio_setup() {
+  gpio_config_t io_conf;
+  //disable interrupt
+  io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
+  //set as output mode
+  io_conf.mode = GPIO_MODE_INPUT_OUTPUT;
+  //bit mask of the pins that you want to set,e.g.GPIO18/19
+  io_conf.pin_bit_mask = GPIO_OUTPUT_PIN_SEL;
+  //disable pull-down mode
+  io_conf.pull_down_en = 0;
+  //disable pull-up mode
+  io_conf.pull_up_en = 0;
+  //configure GPIO with the given settings
+  gpio_config(&io_conf);
+}
+
 //=============
 void app_main()
 {
   tft_setup();
+  gpio_setup();
 
-  char tmp_buff[64];
+  char tmp_buff[BUFFER_SIZE];
 
   font_rotate = 0;
   text_wrap = 0;
@@ -99,14 +123,23 @@ void app_main()
 
   TFT_setFont(COMIC24_FONT, NULL);
 
-  unsigned int rand_num;
+  _fg = TFT_WHITE;
+
+  uint32_t top_level = 0;
+  uint32_t bottom_level = 1;
   while (1) {
-    rand_num = rand_interval(1, 12);
-    _fg = random_color();
-    snprintf(tmp_buff, 64, "Rand(1,12) = %d", rand_num);
+    TFT_fillWindow(TFT_BLACK);
+
+    gpio_set_level(TOP_HEATER_PIN, top_level);
+    gpio_set_level(BOTTOM_HEATER_PIN, bottom_level);
+
+    snprintf(tmp_buff, BUFFER_SIZE, "GPIO[%d] = %d\n", TOP_HEATER_PIN, gpio_get_level(TOP_HEATER_PIN));
     TFT_print(tmp_buff, CENTER, (dispWin.y2-dispWin.y1)/2 - tempy);
-    vTaskDelay(500 / portTICK_RATE_MS);
-    _fg = TFT_BLACK;
-    TFT_print(tmp_buff, CENTER, (dispWin.y2-dispWin.y1)/2 - tempy);
+    snprintf(tmp_buff, BUFFER_SIZE, "GPIO[%d] = %d\n", BOTTOM_HEATER_PIN, gpio_get_level(BOTTOM_HEATER_PIN));
+    TFT_print(tmp_buff, CENTER, LASTY);
+
+    top_level = top_level ? 0 : 1;
+    bottom_level = bottom_level ? 0 : 1;
+    vTaskDelay(2000 / portTICK_RATE_MS);
   }
 }
