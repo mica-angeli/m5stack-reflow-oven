@@ -4,6 +4,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
+#include "driver/i2c.h"
+#include "sdkconfig.h"
 #include "tftspi.h"
 #include "tft.h"
 
@@ -18,6 +20,23 @@
 #define BOTTOM_HEATER_PIN 17
 #define GPIO_OUTPUT_PIN_SEL  ((1ULL<<TOP_HEATER_PIN) | (1ULL<<BOTTOM_HEATER_PIN))
 
+// I2C Settings
+#define I2C_MASTER_SCL 22
+#define I2C_MASTER_SDA 21
+#define I2C_MASTER_NUM 1
+#define I2C_MASTER_FREQ_HZ 100000
+#define I2C_MASTER_SCL_IO I2C_MASTER_SCL
+#define I2C_MASTER_SDA_IO I2C_MASTER_SDA
+#define I2C_MASTER_TX_BUF_DISABLE 0
+#define I2C_MASTER_RX_BUF_DISABLE 0
+#define ESP_SLAVE_ADDR 0x50 //0x60 for thermocouple
+#define WRITE_BIT I2C_MASTER_WRITE              /*!< I2C master write */
+#define READ_BIT I2C_MASTER_READ                /*!< I2C master read */
+#define ACK_CHECK_EN 0x1                        /*!< I2C master will check ack from slave*/
+#define ACK_CHECK_DIS 0x0                       /*!< I2C master will not check ack from slave */
+#define ACK_VAL 0x0                             /*!< I2C ack value */
+#define NACK_VAL 0x1                            /*!< I2C nack value */
+
 static unsigned int rand_interval(unsigned int min, unsigned int max)
 {
   const unsigned int range = 1 + max - min;
@@ -31,6 +50,49 @@ static color_t random_color() {
   color.g  = (uint8_t)rand_interval(20,252);
   color.b  = (uint8_t)rand_interval(20,252);
   return color;
+}
+
+static esp_err_t i2c_master_init()
+{
+  int i2c_master_port = I2C_MASTER_NUM;
+  i2c_config_t conf;
+  conf.mode = I2C_MODE_MASTER;
+  conf.sda_io_num = I2C_MASTER_SDA_IO;
+  conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
+  conf.scl_io_num = I2C_MASTER_SCL_IO;
+  conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
+  conf.master.clk_speed = I2C_MASTER_FREQ_HZ;
+  i2c_param_config(i2c_master_port, &conf);
+  return i2c_driver_install(i2c_master_port, conf.mode,
+                            I2C_MASTER_RX_BUF_DISABLE,
+                            I2C_MASTER_TX_BUF_DISABLE, 0);
+}
+
+/**
+ * @brief test code to read esp-i2c-slave
+ *        We need to fill the buffer of esp slave device, then master can read them out.
+ *
+ * _______________________________________________________________________________________
+ * | start | slave_addr + rd_bit +ack | read n-1 bytes + ack | read 1 byte + nack | stop |
+ * --------|--------------------------|----------------------|--------------------|------|
+ *
+ */
+static esp_err_t i2c_master_read_slave(i2c_port_t i2c_num, uint8_t *data_rd, size_t size)
+{
+  if (size == 0) {
+    return ESP_OK;
+  }
+  i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+  i2c_master_start(cmd);
+  i2c_master_write_byte(cmd, (ESP_SLAVE_ADDR << 1) | READ_BIT, ACK_CHECK_EN);
+  if (size > 1) {
+    i2c_master_read(cmd, data_rd, size - 1, ACK_VAL);
+  }
+  i2c_master_read_byte(cmd, data_rd + size - 1, NACK_VAL);
+  i2c_master_stop(cmd);
+  esp_err_t ret = i2c_master_cmd_begin(i2c_num, cmd, 1000 / portTICK_RATE_MS);
+  i2c_cmd_link_delete(cmd);
+  return ret;
 }
 
 void tft_setup() {
@@ -105,6 +167,7 @@ void app_main()
 {
   tft_setup();
   gpio_setup();
+  i2c_master_init();
 
   char tmp_buff[BUFFER_SIZE];
 
@@ -127,7 +190,12 @@ void app_main()
 
   uint32_t top_level = 0;
   uint32_t bottom_level = 1;
+
+  uint8_t data_rd[2];
+  int value_rd;
   while (1) {
+    i2c_master_read_slave(I2C_MASTER_NUM, data_rd, 2);
+    value_rd = data_rd[0] << 8 | data_rd[1];
     TFT_fillWindow(TFT_BLACK);
 
     gpio_set_level(TOP_HEATER_PIN, top_level);
@@ -149,6 +217,10 @@ void app_main()
 
     top_level = top_level ? 0 : 1;
     bottom_level = bottom_level ? 0 : 1;
+
+    _fg = TFT_WHITE;
+    snprintf(tmp_buff, BUFFER_SIZE, "Data = %d, %04x\n", value_rd, value_rd);
+    TFT_print(tmp_buff, CENTER, (dispWin.y2-dispWin.y1)/2 - tempy);
 
     vTaskDelay(2000 / portTICK_RATE_MS);
   }
