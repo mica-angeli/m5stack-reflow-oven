@@ -4,27 +4,117 @@
 
 #include "mcp9600.h"
 
-static esp_err_t Mcp_read_byte(const Mcp9600 * this, uint8_t reg, uint8_t *output) {
+static esp_err_t Mcp_write_byte(const Mcp9600 * this, uint8_t reg, uint8_t data) {
   i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+  esp_err_t ret;
+
   i2c_master_start(cmd);
-  i2c_master_write_byte(cmd, (this->address << 1) | READ_BIT, ACK_CHECK_EN);
-  i2c_master_read_byte(cmd, output, NACK_VAL);
+  i2c_master_write_byte(cmd, (this->address << 1) | WRITE_BIT, ACK_CHECK_EN);
+  i2c_master_write_byte(cmd, reg, ACK_CHECK_EN);
+  i2c_master_write_byte(cmd, data, ACK_CHECK_EN);
   i2c_master_stop(cmd);
-  esp_err_t ret = i2c_master_cmd_begin(this->master_port, cmd, 1000 / portTICK_RATE_MS);
+  ret = i2c_master_cmd_begin(this->master_port, cmd, 1000 / portTICK_RATE_MS);
   i2c_cmd_link_delete(cmd);
+
   return ret;
 }
 
-static esp_err_t Mcp_read_16bit(const Mcp9600 * this, uint8_t reg, uint16_t *output) {
+static esp_err_t Mcp_write_16bit(const Mcp9600 * this, uint8_t reg, uint16_t data) {
+  i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+  esp_err_t ret;
+
+  i2c_master_start(cmd);
+  i2c_master_write_byte(cmd, (this->address << 1) | WRITE_BIT, ACK_CHECK_EN);
+  i2c_master_write_byte(cmd, reg, ACK_CHECK_EN);
+  i2c_master_write_byte(cmd, (uint8_t) (data >> 8), ACK_CHECK_EN);
+  i2c_master_write_byte(cmd, (uint8_t)  data, ACK_CHECK_EN);
+  i2c_master_stop(cmd);
+  ret = i2c_master_cmd_begin(this->master_port, cmd, 1000 / portTICK_RATE_MS);
+  i2c_cmd_link_delete(cmd);
+
+  return ret;
+}
+
+static esp_err_t Mcp_read_byte(const Mcp9600 * this, uint8_t reg, uint8_t *data) {
+  i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+  esp_err_t ret;
+
+  i2c_master_start(cmd);
+  i2c_master_write_byte(cmd, (this->address << 1) | WRITE_BIT, ACK_CHECK_EN);
+  i2c_master_write_byte(cmd, reg, ACK_CHECK_EN);
+  i2c_master_stop(cmd);
+  ret = i2c_master_cmd_begin(this->master_port, cmd, 1000 / portTICK_RATE_MS);
+  i2c_cmd_link_delete(cmd);
+
+  if (ret != ESP_OK) {
+    return ret;
+  }
+  vTaskDelay(30 / portTICK_RATE_MS);
+
+  cmd = i2c_cmd_link_create();
+  i2c_master_start(cmd);
+  i2c_master_write_byte(cmd, (this->address << 1) | READ_BIT, ACK_CHECK_EN);
+  i2c_master_read_byte(cmd, data, NACK_VAL);
+  i2c_master_stop(cmd);
+  ret = i2c_master_cmd_begin(this->master_port, cmd, 1000 / portTICK_RATE_MS);
+  i2c_cmd_link_delete(cmd);
+
+  return ret;
+}
+
+static esp_err_t Mcp_read_16bit(const Mcp9600 * this, uint8_t reg, uint16_t *data) {
   uint8_t raw_data[2];
   i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+  esp_err_t ret;
+
+  i2c_master_start(cmd);
+  i2c_master_write_byte(cmd, (this->address << 1) | WRITE_BIT, ACK_CHECK_EN);
+  i2c_master_write_byte(cmd, reg, ACK_CHECK_EN);
+  i2c_master_stop(cmd);
+  ret = i2c_master_cmd_begin(this->master_port, cmd, 1000 / portTICK_RATE_MS);
+  i2c_cmd_link_delete(cmd);
+
+  if (ret != ESP_OK) {
+    return ret;
+  }
+  vTaskDelay(30 / portTICK_RATE_MS);
+
+  cmd = i2c_cmd_link_create();
   i2c_master_start(cmd);
   i2c_master_write_byte(cmd, (this->address << 1) | READ_BIT, ACK_CHECK_EN);
   i2c_master_read(cmd, raw_data, 2, NACK_VAL);
   i2c_master_stop(cmd);
-  esp_err_t ret = i2c_master_cmd_begin(this->master_port, cmd, 1000 / portTICK_RATE_MS);
+  ret = i2c_master_cmd_begin(this->master_port, cmd, 1000 / portTICK_RATE_MS);
   i2c_cmd_link_delete(cmd);
-  *output = raw_data [0] << 8 | raw_data[1];
+
+  *data = raw_data [0] << 8 | raw_data[1];
+  return ret;
+}
+
+static esp_err_t Mcp_read_bytes(const Mcp9600 * this, uint8_t reg, uint8_t *data, size_t data_len) {
+  i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+  esp_err_t ret;
+
+  i2c_master_start(cmd);
+  i2c_master_write_byte(cmd, (this->address << 1) | WRITE_BIT, ACK_CHECK_EN);
+  i2c_master_write_byte(cmd, reg, ACK_CHECK_EN);
+  i2c_master_stop(cmd);
+  ret = i2c_master_cmd_begin(this->master_port, cmd, 1000 / portTICK_RATE_MS);
+  i2c_cmd_link_delete(cmd);
+
+  if (ret != ESP_OK) {
+    return ret;
+  }
+  vTaskDelay(30 / portTICK_RATE_MS);
+
+  cmd = i2c_cmd_link_create();
+  i2c_master_start(cmd);
+  i2c_master_write_byte(cmd, (this->address << 1) | READ_BIT, ACK_CHECK_EN);
+  i2c_master_read(cmd, data, data_len, NACK_VAL);
+  i2c_master_stop(cmd);
+  ret = i2c_master_cmd_begin(this->master_port, cmd, 1000 / portTICK_RATE_MS);
+  i2c_cmd_link_delete(cmd);
+
   return ret;
 }
 

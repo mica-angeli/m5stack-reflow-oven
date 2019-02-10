@@ -48,7 +48,7 @@ static color_t random_color() {
   return color;
 }
 
-static esp_err_t i2c_master_init()
+static esp_err_t i2c_setup()
 {
   int i2c_master_port = I2C_MASTER_NUM;
   i2c_config_t conf;
@@ -138,7 +138,8 @@ void app_main()
 
   tft_setup();
   gpio_setup();
-  i2c_master_init();
+  i2c_setup();
+
   Mcp_init(&temp_sensor, 0x50, I2C_MASTER_NUM);
 
   char tmp_buff[BUFFER_SIZE];
@@ -189,7 +190,7 @@ void app_main()
     bottom_level = bottom_level ? 0 : 1;
 
     _fg = TFT_WHITE;
-    snprintf(tmp_buff, BUFFER_SIZE, "Temp. = %f C", temperature);
+    snprintf(tmp_buff, BUFFER_SIZE, "Temp. = %.03f C", temperature);
     TFT_print(tmp_buff, CENTER, (dispWin.y2-dispWin.y1)/2 - tempy);
 
     vTaskDelay(2000 / portTICK_RATE_MS);
