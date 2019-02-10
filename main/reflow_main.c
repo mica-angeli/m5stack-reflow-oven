@@ -134,13 +134,22 @@ void gpio_setup() {
 //=============
 void app_main()
 {
-  Mcp9600 temp_sensor;
-
   tft_setup();
   gpio_setup();
   i2c_setup();
 
-  Mcp_init(&temp_sensor, 0x50, I2C_MASTER_NUM, THER_TYPE_K);
+  // Configure thermocouple
+  Mcp9600 temp_sensor = {
+      .address = 0x50,
+      .master_port = I2C_MASTER_NUM,
+      .thermocouple_type = THER_TYPE_K,
+      .filter_coefficents = FILT_MID,
+      .shutdown_modes = NORMAL_OPERATION,
+      .burst_mode_samples = BURST_32_SAMPLE,
+      .adc_resolution = ADC_14BIT_RESOLUTION,
+      .cold_junction_resolution = COLD_JUNC_RESOLUTION_0_25
+  };
+  Mcp_configure(&temp_sensor);
 
   char tmp_buff[BUFFER_SIZE];
 
