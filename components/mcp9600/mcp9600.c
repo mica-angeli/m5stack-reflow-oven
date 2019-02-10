@@ -150,11 +150,11 @@ esp_err_t Mcp_configure(const Mcp9600 *this) {
   return ret;
 }
 
-esp_err_t Mcp_read_version(const Mcp9600 *this, uint16_t *version) {
+esp_err_t Mcp_get_version(const Mcp9600 *this, uint16_t *version) {
   return Mcp_read_16bit(this, VERSION_ID_REG_ADDR, version);
 }
 
-esp_err_t Mcp_read_hot_junc(const Mcp9600 *this, float *temperature) {
+esp_err_t Mcp_get_hot_junc(const Mcp9600 *this, float *temperature) {
   *temperature = 0.0f;
   uint16_t read_value = 0;
   if(ESP_OK != Mcp_read_16bit(this, HOT_JUNCTION_REG_ADDR, &read_value)) {
@@ -166,7 +166,7 @@ esp_err_t Mcp_read_hot_junc(const Mcp9600 *this, float *temperature) {
   return ESP_OK;
 }
 
-esp_err_t Mcp_read_junc_temp_delta(const Mcp9600 *this, float *temperature) {
+esp_err_t Mcp_get_junc_temp_delta(const Mcp9600 *this, float *temperature) {
   *temperature = 0.0f;
   uint16_t read_value = 0;
   if(ESP_OK != Mcp_read_16bit(this, JUNCTION_TEMP_DELTA_REG_ADDR, &read_value)) {
@@ -178,7 +178,7 @@ esp_err_t Mcp_read_junc_temp_delta(const Mcp9600 *this, float *temperature) {
   return ESP_OK;
 }
 
-esp_err_t Mcp_read_cold_junc(const Mcp9600 *this, float *temperature) {
+esp_err_t Mcp_get_cold_junc(const Mcp9600 *this, float *temperature) {
   *temperature = 0.0f;
   uint16_t read_value = 0;
   if(ESP_OK != Mcp_read_16bit(this, COLD_JUNCTION_TEMP_REG_ADDR, &read_value)) {

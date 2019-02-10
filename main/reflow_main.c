@@ -174,7 +174,7 @@ void app_main()
   uint32_t bottom_level = 1;
   float temperature = 0.0f;
   while (1) {
-    Mcp_read_hot_junc(&temp_sensor, &temperature);
+    Mcp_get_hot_junc(&temp_sensor, &temperature);
 
     TFT_fillWindow(TFT_BLACK);
 

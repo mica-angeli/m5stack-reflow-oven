@@ -92,11 +92,12 @@ typedef struct {
 
 extern esp_err_t Mcp_configure(const Mcp9600 *this);
 
-extern esp_err_t Mcp_read_version(const Mcp9600 *this, uint16_t *version);
+extern esp_err_t Mcp_get_version(const Mcp9600 *this, uint16_t *version);
 
-extern esp_err_t Mcp_read_hot_junc(const Mcp9600 *this, float *temperature);
+extern esp_err_t Mcp_get_hot_junc(const Mcp9600 *this, float *temperature);
 
-extern esp_err_t Mcp_read_junc_temp_delta(const Mcp9600 *this, float *temperature);
+extern esp_err_t Mcp_get_junc_temp_delta(const Mcp9600 *this, float *temperature);
 
-extern esp_err_t Mcp_read_cold_junc(const Mcp9600 *this, float *temperature);
+extern esp_err_t Mcp_get_cold_junc(const Mcp9600 *this, float *temperature);
+
 #endif //_MCP9600_H
