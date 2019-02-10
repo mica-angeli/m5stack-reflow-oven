@@ -1,6 +1,7 @@
 //
 // Created by ricardo on 2/9/19.
 //
+#include <stdio.h>
 
 #include "mcp9600.h"
 
@@ -118,10 +119,16 @@ static esp_err_t Mcp_read_bytes(const Mcp9600 * this, uint8_t reg, uint8_t *data
   return ret;
 }
 
-esp_err_t Mcp_init(Mcp9600 *this, uint8_t sensor_address, i2c_port_t master_port) {
+esp_err_t Mcp_init(Mcp9600 *this, uint8_t sensor_address, i2c_port_t master_port, mcp_ther_t thermocouple_type) {
   this->address = sensor_address;
   this->master_port = master_port;
-  return ESP_OK;
+
+  uint16_t ver;
+  if(ESP_OK == Mcp_read_version(this, &ver)) {
+    printf("MCP9600 Version: %x", ver);
+  }
+
+  return Mcp_set_therm_type(this, thermocouple_type);
 }
 
 esp_err_t Mcp_read_version(const Mcp9600 *this, uint16_t *version) {
@@ -131,11 +138,29 @@ esp_err_t Mcp_read_version(const Mcp9600 *this, uint16_t *version) {
 esp_err_t Mcp_read_hot_junc(const Mcp9600 *this, float *temperature) {
   *temperature = 0.0f;
   uint16_t read_value = 0;
-  if(ESP_OK != Mcp_read_16bit(this, 0x0, &read_value)) {
+  if(ESP_OK != Mcp_read_16bit(this, HOT_JUNCTION_REG_ADDR, &read_value)) {
     return ESP_FAIL;
   }
 
-  *temperature = read_value / 1000.0f;
+  if(read_value & 0x8000) {
+    *temperature = (read_value>>8) * 16.0f + (read_value & 0x00ff)/16.0f - 4096.0f;
+  }
+  else
+  {
+    *temperature = (read_value>>8) * 16.0f + (read_value & 0x00ff)/16.0f;
+  }
 
   return ESP_OK;
+}
+
+esp_err_t Mcp_set_therm_type(const Mcp9600 *this, mcp_ther_t type) {
+  uint8_t therm_cfg_data = 0;
+  uint8_t byte_to_set = 0;
+  if(ESP_OK != Mcp_read_byte(this, THERM_SENS_CFG_REG_ADDR, &therm_cfg_data)) {
+    return ESP_FAIL;
+  }
+
+  byte_to_set = (therm_cfg_data & (uint8_t) 0x8f) | type;
+
+  return Mcp_write_byte(this, THERM_SENS_CFG_REG_ADDR, byte_to_set);
 }

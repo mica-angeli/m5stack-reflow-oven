@@ -51,16 +51,6 @@
 #define RESOLUTION_0_125_DEGREE             0X02
 #define RESOLUTION_0_0625_DEGREE            0X03
 
-#define THER_TYPE_K                         0X0<<4
-#define THER_TYPE_J                         0X1<<4
-#define THER_TYPE_T                         0X2<<4
-#define THER_TYPE_N                         0X3<<4
-#define THER_TYPE_S                         0X4<<4
-#define THER_TYPE_E                         0X5<<4
-#define THER_TYPE_B                         0X6<<4
-#define THER_TYPE_R                         0X7<<4
-
-
 #define ALERT_NUN_1                         1
 #define ALERT_NUN_2                         2
 #define ALERT_NUN_3                         3
@@ -106,16 +96,28 @@
 
 #define UPDATE_FLAG                         1<<6
 
+typedef enum {
+  THER_TYPE_K = 0,
+  THER_TYPE_J,
+  THER_TYPE_T,
+  THER_TYPE_N,
+  THER_TYPE_S,
+  THER_TYPE_E,
+  THER_TYPE_B,
+  THER_TYPE_R
+} mcp_ther_t;
+
 typedef struct {
   uint8_t address;
   i2c_port_t master_port;
 
 } Mcp9600;
 
-extern esp_err_t Mcp_init(Mcp9600 *this, uint8_t sensor_address, i2c_port_t master_port);
+extern esp_err_t Mcp_init(Mcp9600 *this, uint8_t sensor_address, i2c_port_t master_port, mcp_ther_t thermocouple_type);
 
 extern esp_err_t Mcp_read_version(const Mcp9600 *this, uint16_t *version);
 
 extern esp_err_t Mcp_read_hot_junc(const Mcp9600 *this, float *temperature);
 
+extern esp_err_t Mcp_set_therm_type(const Mcp9600 *this, mcp_ther_t type);
 #endif //_MCP9600_H

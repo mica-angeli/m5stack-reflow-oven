@@ -140,7 +140,7 @@ void app_main()
   gpio_setup();
   i2c_setup();
 
-  Mcp_init(&temp_sensor, 0x50, I2C_MASTER_NUM);
+  Mcp_init(&temp_sensor, 0x50, I2C_MASTER_NUM, THER_TYPE_K);
 
   char tmp_buff[BUFFER_SIZE];
 
