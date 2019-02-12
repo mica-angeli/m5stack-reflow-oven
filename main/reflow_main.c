@@ -154,9 +154,7 @@ void gpio_setup() {
   gpio_isr_handler_add(BUTTON_C_PIN, button_handler, (void*) BUTTON_C_PIN);
 }
 
-//=============
-void app_main()
-{
+static void display_task(void* arg) {
   tft_setup();
   gpio_setup();
   i2c_setup();
@@ -230,4 +228,9 @@ void app_main()
     }
 
   }
+}
+
+void app_main()
+{
+  xTaskCreate(display_task, "display_task", 1024 * 2, NULL, 5, NULL);
 }
