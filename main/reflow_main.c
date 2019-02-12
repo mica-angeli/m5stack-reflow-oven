@@ -17,9 +17,14 @@
 
 #define BUFFER_SIZE 128
 
+// GPIO Settings
 #define TOP_HEATER_PIN 16
 #define BOTTOM_HEATER_PIN 17
-#define GPIO_OUTPUT_PIN_SEL  ((1ULL<<TOP_HEATER_PIN) | (1ULL<<BOTTOM_HEATER_PIN))
+#define BUTTON_A_PIN 39
+#define BUTTON_B_PIN 38
+#define BUTTON_C_PIN 37
+
+#define ESP_INTR_FLAG_DEFAULT 0
 
 // I2C Settings
 #define I2C_MASTER_SCL 22
@@ -32,20 +37,18 @@
 #define I2C_MASTER_RX_BUF_DISABLE 0
 #define ESP_SLAVE_ADDR 0x50 //0x60 for thermocouple
 
+typedef enum {
+  BUTTON_A_PRESSED,
+  BUTTON_B_PRESSED,
+  BUTTON_C_PRESSED,
+  BUTTON_LEN
+} button_t;
 
-static unsigned int rand_interval(unsigned int min, unsigned int max)
-{
-  const unsigned int range = 1 + max - min;
-  return min + (rand() % range);
-}
+static xQueueHandle button_evt_queue = NULL;
 
-static color_t random_color() {
-
-  color_t color;
-  color.r  = (uint8_t)rand_interval(20,252);
-  color.g  = (uint8_t)rand_interval(20,252);
-  color.b  = (uint8_t)rand_interval(20,252);
-  return color;
+static void IRAM_ATTR button_handler(void* arg) {
+  button_t button = (uint32_t) arg;
+  xQueueSendFromISR(button_evt_queue, &button, NULL);
 }
 
 static esp_err_t i2c_setup()
@@ -116,19 +119,29 @@ void tft_setup() {
 }
 
 void gpio_setup() {
-  gpio_config_t io_conf;
-  //disable interrupt
-  io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
-  //set as output mode
-  io_conf.mode = GPIO_MODE_INPUT_OUTPUT;
-  //bit mask of the pins that you want to set,e.g.GPIO18/19
-  io_conf.pin_bit_mask = GPIO_OUTPUT_PIN_SEL;
-  //disable pull-down mode
-  io_conf.pull_down_en = 0;
-  //disable pull-up mode
-  io_conf.pull_up_en = 0;
-  //configure GPIO with the given settings
-  gpio_config(&io_conf);
+  gpio_config_t heater_conf = {
+      .intr_type = GPIO_PIN_INTR_DISABLE,
+      .mode = GPIO_MODE_INPUT_OUTPUT,
+      .pin_bit_mask = (1ULL<<TOP_HEATER_PIN) | (1ULL<<BOTTOM_HEATER_PIN),
+      .pull_down_en = 0,
+      .pull_up_en = 0
+  };
+  gpio_config(&heater_conf);
+
+  gpio_config_t button_conf = {
+      .intr_type = GPIO_PIN_INTR_NEGEDGE,
+      .mode = GPIO_MODE_INPUT,
+      .pin_bit_mask = (1ULL<<BUTTON_A_PIN) | (1ULL<<BUTTON_B_PIN) | (1ULL<<BUTTON_C_PIN),
+      .pull_down_en = 0,
+      .pull_up_en = 0
+  };
+  gpio_config(&button_conf);
+
+  button_evt_queue = xQueueCreate(10, sizeof(uint32_t));
+  gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+  gpio_isr_handler_add(BUTTON_A_PIN, button_handler, (void*) BUTTON_A_PRESSED);
+  gpio_isr_handler_add(BUTTON_B_PIN, button_handler, (void*) BUTTON_B_PRESSED);
+  gpio_isr_handler_add(BUTTON_C_PIN, button_handler, (void*) BUTTON_C_PRESSED);
 }
 
 //=============
@@ -173,6 +186,7 @@ void app_main()
   uint32_t top_level = 0;
   uint32_t bottom_level = 1;
   float temperature = 0.0f;
+  button_t button = 0;
   while (1) {
     Mcp_get_hot_junc(&temp_sensor, &temperature);
 
@@ -199,9 +213,14 @@ void app_main()
     bottom_level = bottom_level ? 0 : 1;
 
     _fg = TFT_WHITE;
-    snprintf(tmp_buff, BUFFER_SIZE, "Temp. = %.03f C", temperature);
+    snprintf(tmp_buff, BUFFER_SIZE, "Temp. = %.03f C\n", temperature);
     TFT_print(tmp_buff, CENTER, (dispWin.y2-dispWin.y1)/2 - tempy);
 
-    vTaskDelay(2000 / portTICK_RATE_MS);
+    if(xQueueReceive(button_evt_queue, &button, 2000)) {
+      snprintf(tmp_buff, BUFFER_SIZE, "Button #%d intr\n", button);
+      TFT_print(tmp_buff, CENTER, LASTY);
+    }
+
+//    vTaskDelay(2000 / portTICK_RATE_MS);
   }
 }
