@@ -37,17 +37,17 @@
 #define I2C_MASTER_RX_BUF_DISABLE 0
 #define ESP_SLAVE_ADDR 0x50 //0x60 for thermocouple
 
-typedef enum {
-  BUTTON_A_PRESSED,
-  BUTTON_B_PRESSED,
-  BUTTON_C_PRESSED,
-  BUTTON_LEN
-} button_t;
+//typedef enum {
+//  BUTTON_A_PRESSED,
+//  BUTTON_B_PRESSED,
+//  BUTTON_C_PRESSED,
+//  BUTTON_LEN
+//} button_t;
 
 static xQueueHandle button_evt_queue = NULL;
 
 static void IRAM_ATTR button_handler(void* arg) {
-  button_t button = (uint32_t) arg;
+  uint32_t button = (uint32_t) arg;
   xQueueSendFromISR(button_evt_queue, &button, NULL);
 }
 
@@ -139,9 +139,9 @@ void gpio_setup() {
 
   button_evt_queue = xQueueCreate(10, sizeof(uint32_t));
   gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
-  gpio_isr_handler_add(BUTTON_A_PIN, button_handler, (void*) BUTTON_A_PRESSED);
-  gpio_isr_handler_add(BUTTON_B_PIN, button_handler, (void*) BUTTON_B_PRESSED);
-  gpio_isr_handler_add(BUTTON_C_PIN, button_handler, (void*) BUTTON_C_PRESSED);
+  gpio_isr_handler_add(BUTTON_A_PIN, button_handler, (void*) BUTTON_A_PIN);
+  gpio_isr_handler_add(BUTTON_B_PIN, button_handler, (void*) BUTTON_B_PIN);
+  gpio_isr_handler_add(BUTTON_C_PIN, button_handler, (void*) BUTTON_C_PIN);
 }
 
 //=============
@@ -186,11 +186,9 @@ void app_main()
   uint32_t top_level = 0;
   uint32_t bottom_level = 1;
   float temperature = 0.0f;
-  button_t button = 0;
+  uint32_t button = 0;
   while (1) {
     Mcp_get_hot_junc(&temp_sensor, &temperature);
-
-    TFT_fillWindow(TFT_BLACK);
 
     gpio_set_level(TOP_HEATER_PIN, top_level);
     gpio_set_level(BOTTOM_HEATER_PIN, bottom_level);
@@ -199,28 +197,27 @@ void app_main()
     TFT_print("TOP H. = ", 10, 5);
 
     _fg = gpio_get_level(TOP_HEATER_PIN) ? TFT_RED : TFT_WHITE;
-    snprintf(tmp_buff, BUFFER_SIZE, "%s", gpio_get_level(TOP_HEATER_PIN) ? "ON " : "OFF");
+    snprintf(tmp_buff, BUFFER_SIZE, "\r%s", gpio_get_level(TOP_HEATER_PIN) ? "ON " : "OFF");
     TFT_print(tmp_buff, LASTX, LASTY);
 
     _fg = TFT_WHITE;
     TFT_print("   BOT. H. = ", LASTX, LASTY);
 
     _fg = gpio_get_level(BOTTOM_HEATER_PIN) ? TFT_RED : TFT_WHITE;
-    snprintf(tmp_buff, BUFFER_SIZE, "%s", gpio_get_level(BOTTOM_HEATER_PIN) ? "ON " : "OFF");
+    snprintf(tmp_buff, BUFFER_SIZE, "\r%s", gpio_get_level(BOTTOM_HEATER_PIN) ? "ON " : "OFF");
     TFT_print(tmp_buff, LASTX, LASTY);
 
     top_level = top_level ? 0 : 1;
     bottom_level = bottom_level ? 0 : 1;
 
     _fg = TFT_WHITE;
-    snprintf(tmp_buff, BUFFER_SIZE, "Temp. = %.03f C\n", temperature);
-    TFT_print(tmp_buff, CENTER, (dispWin.y2-dispWin.y1)/2 - tempy);
+    snprintf(tmp_buff, BUFFER_SIZE, "Temp. = \r%.03f C\n", temperature);
+    TFT_print(tmp_buff, 60, (dispWin.y2-dispWin.y1)/2 - tempy);
 
-    if(xQueueReceive(button_evt_queue, &button, 2000)) {
-      snprintf(tmp_buff, BUFFER_SIZE, "Button #%d intr\n", button);
+    if(xQueueReceive(button_evt_queue, &button, 1000) && !gpio_get_level(button)) {
+      snprintf(tmp_buff, BUFFER_SIZE, "Button #%d Pressed\n", button);
       TFT_print(tmp_buff, CENTER, LASTY);
     }
 
-//    vTaskDelay(2000 / portTICK_RATE_MS);
   }
 }
