@@ -24,6 +24,7 @@
 #define BUTTON_B_PIN 38
 #define BUTTON_C_PIN 37
 
+#define BUTTON_DEBOUNCING_TICKS 200
 #define ESP_INTR_FLAG_DEFAULT 0
 
 // I2C Settings
@@ -47,8 +48,17 @@
 static xQueueHandle button_evt_queue = NULL;
 
 static void IRAM_ATTR button_handler(void* arg) {
+  static TickType_t last_time = 0;
+  const TickType_t now_time = xTaskGetTickCountFromISR();
+
   uint32_t button = (uint32_t) arg;
-  xQueueSendFromISR(button_evt_queue, &button, NULL);
+
+  // Button debouncing
+  if(!gpio_get_level(button) &&
+      (now_time - last_time) > BUTTON_DEBOUNCING_TICKS) {
+    xQueueSendFromISR(button_evt_queue, &button, NULL);
+  }
+  last_time = now_time;
 }
 
 static esp_err_t i2c_setup()
@@ -214,7 +224,7 @@ void app_main()
     snprintf(tmp_buff, BUFFER_SIZE, "Temp. = \r%.03f C\n", temperature);
     TFT_print(tmp_buff, 60, (dispWin.y2-dispWin.y1)/2 - tempy);
 
-    if(xQueueReceive(button_evt_queue, &button, 1000) && !gpio_get_level(button)) {
+    if(xQueueReceive(button_evt_queue, &button, portMAX_DELAY) && !gpio_get_level(button)) {
       snprintf(tmp_buff, BUFFER_SIZE, "Button #%d Pressed\n", button);
       TFT_print(tmp_buff, CENTER, LASTY);
     }
