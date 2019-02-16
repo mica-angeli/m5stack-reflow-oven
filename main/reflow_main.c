@@ -166,7 +166,7 @@ void gpio_setup() {
   gpio_isr_handler_add(BUTTON_C_PIN, button_handler, (void*) BUTTON_C_PIN);
 }
 
-static void display_task(void* arg) {
+static void control_task(void* arg) {
   // Configure thermocouple
   Mcp9600 temp_sensor = {
       .address = 0x60,
@@ -179,6 +179,22 @@ static void display_task(void* arg) {
       .cold_junction_resolution = COLD_JUNC_RESOLUTION_0_25
   };
   Mcp_configure(&temp_sensor);
+
+  event_t temp_event = {
+      .type = TEMPERATURE_UPDATE,
+      .value = NULL
+  };
+
+  while(1) {
+    if(ESP_OK == Mcp_get_hot_junc(&temp_sensor, (float *) &temp_event.value)) {
+      xQueueSend(event_queue, &temp_event, 0);
+    }
+    vTaskDelay(100 / portTICK_RATE_MS);
+  }
+}
+
+static void display_task(void* arg) {
+
 
   char tmp_buff[BUFFER_SIZE];
 
@@ -201,43 +217,43 @@ static void display_task(void* arg) {
 
   uint32_t top_level = 0;
   uint32_t bottom_level = 1;
-  float temperature = 0.0f;
   event_t received_event;
   while (1) {
-
-
-    gpio_set_level(TOP_HEATER_PIN, top_level);
-    gpio_set_level(BOTTOM_HEATER_PIN, bottom_level);
-
+  // Old heater code
+//    gpio_set_level(TOP_HEATER_PIN, top_level);
+//    gpio_set_level(BOTTOM_HEATER_PIN, bottom_level);
+//
+//    _fg = TFT_WHITE;
+//    TFT_print("TOP H. = ", 10, 5);
+//
+//    _fg = gpio_get_level(TOP_HEATER_PIN) ? TFT_RED : TFT_WHITE;
+//    snprintf(tmp_buff, BUFFER_SIZE, "\r%s", gpio_get_level(TOP_HEATER_PIN) ? "ON " : "OFF");
+//    TFT_print(tmp_buff, LASTX, LASTY);
+//
+//    _fg = TFT_WHITE;
+//    TFT_print("   BOT. H. = ", LASTX, LASTY);
+//
+//    _fg = gpio_get_level(BOTTOM_HEATER_PIN) ? TFT_RED : TFT_WHITE;
+//    snprintf(tmp_buff, BUFFER_SIZE, "\r%s", gpio_get_level(BOTTOM_HEATER_PIN) ? "ON " : "OFF");
+//    TFT_print(tmp_buff, LASTX, LASTY);
+//
+//    top_level = top_level ? 0 : 1;
+//    bottom_level = bottom_level ? 0 : 1;
     _fg = TFT_WHITE;
-    TFT_print("TOP H. = ", 10, 5);
-
-    _fg = gpio_get_level(TOP_HEATER_PIN) ? TFT_RED : TFT_WHITE;
-    snprintf(tmp_buff, BUFFER_SIZE, "\r%s", gpio_get_level(TOP_HEATER_PIN) ? "ON " : "OFF");
-    TFT_print(tmp_buff, LASTX, LASTY);
-
-    _fg = TFT_WHITE;
-    TFT_print("   BOT. H. = ", LASTX, LASTY);
-
-    _fg = gpio_get_level(BOTTOM_HEATER_PIN) ? TFT_RED : TFT_WHITE;
-    snprintf(tmp_buff, BUFFER_SIZE, "\r%s", gpio_get_level(BOTTOM_HEATER_PIN) ? "ON " : "OFF");
-    TFT_print(tmp_buff, LASTX, LASTY);
-
-    top_level = top_level ? 0 : 1;
-    bottom_level = bottom_level ? 0 : 1;
-
-    _fg = TFT_WHITE;
-    if(ESP_OK == Mcp_get_hot_junc(&temp_sensor, &temperature)) {
-      snprintf(tmp_buff, BUFFER_SIZE, "Temp. = \r%.01f C\n", temperature);
-      TFT_print(tmp_buff, 10, (dispWin.y2 - dispWin.y1) / 2 - tempy);
+    // Redraw GUI objects when there is an update from the event queue
+    if(xQueueReceive(event_queue, &received_event, portMAX_DELAY)) {
+      if(BUTTON_PRESSED == received_event.type &&
+         !gpio_get_level((uint32_t) received_event.value)) {
+        snprintf(tmp_buff, BUFFER_SIZE, "Button #%d Pressed\n", (uint32_t) received_event.value);
+        TFT_print(tmp_buff, 10, 100);
+      }
+      else if(TEMPERATURE_UPDATE == received_event.type) {
+        const float temperature = *(float *)&received_event.value;
+        snprintf(tmp_buff, BUFFER_SIZE, "Temp. = \r%.01f C\n", temperature);
+        TFT_print(tmp_buff, 10, 80);
+      }
     }
 
-    if(xQueueReceive(event_queue, &received_event, 100) &&
-       BUTTON_PRESSED == received_event.type &&
-       !gpio_get_level((uint32_t) received_event.value)) {
-      snprintf(tmp_buff, BUFFER_SIZE, "Button #%d Pressed\n", (uint32_t) received_event.value);
-      TFT_print(tmp_buff, CENTER, LASTY);
-    }
 
   }
 }
@@ -249,4 +265,5 @@ void app_main()
   i2c_setup();
 
   xTaskCreate(display_task, "display_task", 1024 * 2, NULL, 5, NULL);
+  xTaskCreate(control_task, "control_task", 1024 * 2, NULL, 6, NULL);
 }
