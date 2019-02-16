@@ -100,4 +100,6 @@ extern esp_err_t Mcp_get_junc_temp_delta(const Mcp9600 *this, float *temperature
 
 extern esp_err_t Mcp_get_cold_junc(const Mcp9600 *this, float *temperature);
 
+extern esp_err_t Mcp_read_bytes(const Mcp9600 * this, uint8_t reg, uint8_t *data, size_t data_len);
+
 #endif //_MCP9600_H

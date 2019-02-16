@@ -31,7 +31,7 @@
 #define I2C_MASTER_SCL 22
 #define I2C_MASTER_SDA 21
 #define I2C_MASTER_NUM 1
-#define I2C_MASTER_FREQ_HZ 100000
+#define I2C_MASTER_FREQ_HZ 50000
 #define I2C_MASTER_SCL_IO I2C_MASTER_SCL
 #define I2C_MASTER_SDA_IO I2C_MASTER_SDA
 #define I2C_MASTER_TX_BUF_DISABLE 0
@@ -161,7 +161,7 @@ static void display_task(void* arg) {
 
   // Configure thermocouple
   Mcp9600 temp_sensor = {
-      .address = 0x50,
+      .address = 0x60, //0x50
       .master_port = I2C_MASTER_NUM,
       .thermocouple_type = THER_TYPE_K,
       .filter_coefficents = FILT_MID,
@@ -194,9 +194,10 @@ static void display_task(void* arg) {
   uint32_t top_level = 0;
   uint32_t bottom_level = 1;
   float temperature = 0.0f;
+  uint16_t raw_temp_val = 0;
   uint32_t button = 0;
   while (1) {
-    Mcp_get_hot_junc(&temp_sensor, &temperature);
+
 
     gpio_set_level(TOP_HEATER_PIN, top_level);
     gpio_set_level(BOTTOM_HEATER_PIN, bottom_level);
@@ -219,10 +220,13 @@ static void display_task(void* arg) {
     bottom_level = bottom_level ? 0 : 1;
 
     _fg = TFT_WHITE;
-    snprintf(tmp_buff, BUFFER_SIZE, "Temp. = \r%.03f C\n", temperature);
-    TFT_print(tmp_buff, 60, (dispWin.y2-dispWin.y1)/2 - tempy);
+    if(ESP_OK == Mcp_get_hot_junc(&temp_sensor, &temperature)) {
+      Mcp_read_bytes(&temp_sensor, HOT_JUNCTION_REG_ADDR, &raw_temp_val, 2);
+      snprintf(tmp_buff, BUFFER_SIZE, "Temp. = \r%.03f C, 0x%04X\n", temperature, raw_temp_val);
+      TFT_print(tmp_buff, 10, (dispWin.y2 - dispWin.y1) / 2 - tempy);
+    }
 
-    if(xQueueReceive(button_evt_queue, &button, portMAX_DELAY) && !gpio_get_level(button)) {
+    if(xQueueReceive(button_evt_queue, &button, 100) && !gpio_get_level(button)) {
       snprintf(tmp_buff, BUFFER_SIZE, "Button #%d Pressed\n", button);
       TFT_print(tmp_buff, CENTER, LASTY);
     }
