@@ -36,7 +36,6 @@
 #define I2C_MASTER_SDA_IO I2C_MASTER_SDA
 #define I2C_MASTER_TX_BUF_DISABLE 0
 #define I2C_MASTER_RX_BUF_DISABLE 0
-#define ESP_SLAVE_ADDR 0x50 //0x60 for thermocouple
 
 //typedef enum {
 //  BUTTON_A_PRESSED,
@@ -45,18 +44,31 @@
 //  BUTTON_LEN
 //} button_t;
 
-static xQueueHandle button_evt_queue = NULL;
+static xQueueHandle event_queue = NULL;
+
+typedef enum {
+  BUTTON_PRESSED,
+  TEMPERATURE_UPDATE
+} event_type_t;
+
+typedef struct {
+  event_type_t type;
+  void* value;
+} event_t;
 
 static void IRAM_ATTR button_handler(void* arg) {
   static TickType_t last_time = 0;
   const TickType_t now_time = xTaskGetTickCountFromISR();
 
-  uint32_t button = (uint32_t) arg;
+  event_t event = {
+      .type = BUTTON_PRESSED,
+      .value = arg
+  };
 
   // Button debouncing
-  if(!gpio_get_level(button) &&
+  if(!gpio_get_level((uint32_t) arg) &&
       (now_time - last_time) > BUTTON_DEBOUNCING_TICKS) {
-    xQueueSendFromISR(button_evt_queue, &button, NULL);
+    xQueueSendFromISR(event_queue, &event, NULL);
   }
   last_time = now_time;
 }
@@ -147,7 +159,7 @@ void gpio_setup() {
   };
   gpio_config(&button_conf);
 
-  button_evt_queue = xQueueCreate(10, sizeof(uint32_t));
+  event_queue = xQueueCreate(10, sizeof(event_t) + 4);
   gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
   gpio_isr_handler_add(BUTTON_A_PIN, button_handler, (void*) BUTTON_A_PIN);
   gpio_isr_handler_add(BUTTON_B_PIN, button_handler, (void*) BUTTON_B_PIN);
@@ -155,13 +167,9 @@ void gpio_setup() {
 }
 
 static void display_task(void* arg) {
-  tft_setup();
-  gpio_setup();
-  i2c_setup();
-
   // Configure thermocouple
   Mcp9600 temp_sensor = {
-      .address = 0x60, //0x50
+      .address = 0x60,
       .master_port = I2C_MASTER_NUM,
       .thermocouple_type = THER_TYPE_K,
       .filter_coefficents = FILT_MID,
@@ -194,8 +202,7 @@ static void display_task(void* arg) {
   uint32_t top_level = 0;
   uint32_t bottom_level = 1;
   float temperature = 0.0f;
-  uint16_t raw_temp_val = 0;
-  uint32_t button = 0;
+  event_t received_event;
   while (1) {
 
 
@@ -221,13 +228,14 @@ static void display_task(void* arg) {
 
     _fg = TFT_WHITE;
     if(ESP_OK == Mcp_get_hot_junc(&temp_sensor, &temperature)) {
-      Mcp_read_bytes(&temp_sensor, HOT_JUNCTION_REG_ADDR, &raw_temp_val, 2);
-      snprintf(tmp_buff, BUFFER_SIZE, "Temp. = \r%.03f C, 0x%04X\n", temperature, raw_temp_val);
+      snprintf(tmp_buff, BUFFER_SIZE, "Temp. = \r%.01f C\n", temperature);
       TFT_print(tmp_buff, 10, (dispWin.y2 - dispWin.y1) / 2 - tempy);
     }
 
-    if(xQueueReceive(button_evt_queue, &button, 100) && !gpio_get_level(button)) {
-      snprintf(tmp_buff, BUFFER_SIZE, "Button #%d Pressed\n", button);
+    if(xQueueReceive(event_queue, &received_event, 100) &&
+       BUTTON_PRESSED == received_event.type &&
+       !gpio_get_level((uint32_t) received_event.value)) {
+      snprintf(tmp_buff, BUFFER_SIZE, "Button #%d Pressed\n", (uint32_t) received_event.value);
       TFT_print(tmp_buff, CENTER, LASTY);
     }
 
@@ -236,5 +244,9 @@ static void display_task(void* arg) {
 
 void app_main()
 {
+  tft_setup();
+  gpio_setup();
+  i2c_setup();
+
   xTaskCreate(display_task, "display_task", 1024 * 2, NULL, 5, NULL);
 }
