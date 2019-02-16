@@ -45,14 +45,16 @@
 //  BUTTON_LEN
 //} button_t;
 
+// Global variables
 static xQueueHandle event_queue = NULL;
 
 static float setpoint = 100.0f;
+static float pid_output = 0.0f;
 
 typedef enum {
   BUTTON_PRESSED,
   TEMPERATURE_UPDATE,
-  COMMAND_UPDATE
+  DUTY_CYCLE_UPDATE
 } event_type_t;
 
 typedef struct {
@@ -190,25 +192,61 @@ static void control_task(void* arg) {
   };
 
   event_t cmd_event = {
-      .type = COMMAND_UPDATE,
+      .type = DUTY_CYCLE_UPDATE,
       .value = NULL
   };
 
+  float temperature = 0.0f;
+
   pid temp_pid;
-  pid_set_gains(&temp_pid, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, false);
+  pid_set_gains(&temp_pid, 2.0f, 0.0f, 0.0f, 0.0f, 0.0f, false);
+
+  TickType_t last_pid_time = 0;
 
   while(1) {
+    const TickType_t now_time = xTaskGetTickCount();
+
     if(ESP_OK == Mcp_get_hot_junc(&temp_sensor, (float *) &temp_event.value)) {
-      const float temperature = *(float *)&temp_event.value;
+      temperature = *(float *)&temp_event.value;
+
+      xQueueSend(event_queue, &temp_event, 0);
+    }
+
+    if((now_time - last_pid_time) >= 1000 / portTICK_RATE_MS) {
       const float error = setpoint - temperature;
 
       float* command = (float *) &cmd_event.value;
-      *command = pid_compute_command(&temp_pid, error, 0.1f);
+      *command = pid_compute_command(&temp_pid, error, (now_time - last_pid_time) * portTICK_RATE_MS);
+      *command = clamp(*command, 0.0f, 100.0f);
+      pid_output = *command;
 
       xQueueSend(event_queue, &cmd_event, 0);
-      xQueueSend(event_queue, &temp_event, 0);
+
+      last_pid_time = now_time;
     }
     vTaskDelay(100 / portTICK_RATE_MS);
+  }
+}
+
+static void heater_task(void* arg) {
+  float duty_cycle = 0.0f;
+  const float period = 1000.0f;
+  float on_time, off_time;
+
+  while(1) {
+    duty_cycle = pid_output / 100.0f;
+    on_time = duty_cycle * period;
+    off_time = period - on_time;
+
+    // Turn on heaters
+    gpio_set_level(TOP_HEATER_PIN, 1);
+    gpio_set_level(BOTTOM_HEATER_PIN, 1);
+    vTaskDelay ((TickType_t) on_time / portTICK_RATE_MS);
+
+    // Turn off heaters
+    gpio_set_level(TOP_HEATER_PIN, 0);
+    gpio_set_level(BOTTOM_HEATER_PIN, 0);
+    vTaskDelay ((TickType_t) off_time / portTICK_RATE_MS);
   }
 }
 
@@ -237,6 +275,7 @@ static void display_task(void* arg) {
   uint32_t top_level = 0;
   uint32_t bottom_level = 1;
   event_t received_event;
+
   while (1) {
   // Old heater code
 //    gpio_set_level(TOP_HEATER_PIN, top_level);
@@ -271,9 +310,9 @@ static void display_task(void* arg) {
         snprintf(tmp_buff, BUFFER_SIZE, "Temp. = \r%.01f C\n", temperature);
         TFT_print(tmp_buff, 10, 80);
       }
-      else if(COMMAND_UPDATE == received_event.type) {
+      else if(DUTY_CYCLE_UPDATE == received_event.type) {
         const float command = *(float *)&received_event.value;
-        snprintf(tmp_buff, BUFFER_SIZE, "Cmd. = \r%.01f C\n", command);
+        snprintf(tmp_buff, BUFFER_SIZE, "Duty Cycle = \r%.01f %% \n", command);
         TFT_print(tmp_buff, 10, 100);
       }
     }
@@ -290,4 +329,5 @@ void app_main()
 
   xTaskCreate(display_task, "display_task", 1024 * 2, NULL, 5, NULL);
   xTaskCreate(control_task, "control_task", 1024 * 2, NULL, 6, NULL);
+  xTaskCreate(heater_task, "heater_task", 1024 * 2, NULL, 7, NULL);
 }
