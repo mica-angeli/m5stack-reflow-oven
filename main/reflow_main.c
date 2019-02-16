@@ -9,6 +9,7 @@
 #include "tftspi.h"
 #include "tft.h"
 #include "mcp9600.h"
+#include "pid.h"
 
 // ==========================================================
 // Define which spi bus to use TFT_VSPI_HOST or TFT_HSPI_HOST
@@ -46,9 +47,12 @@
 
 static xQueueHandle event_queue = NULL;
 
+static float setpoint = 100.0f;
+
 typedef enum {
   BUTTON_PRESSED,
-  TEMPERATURE_UPDATE
+  TEMPERATURE_UPDATE,
+  COMMAND_UPDATE
 } event_type_t;
 
 typedef struct {
@@ -185,8 +189,23 @@ static void control_task(void* arg) {
       .value = NULL
   };
 
+  event_t cmd_event = {
+      .type = COMMAND_UPDATE,
+      .value = NULL
+  };
+
+  pid temp_pid;
+  pid_set_gains(&temp_pid, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, false);
+
   while(1) {
     if(ESP_OK == Mcp_get_hot_junc(&temp_sensor, (float *) &temp_event.value)) {
+      const float temperature = *(float *)&temp_event.value;
+      const float error = setpoint - temperature;
+
+      float* command = (float *) &cmd_event.value;
+      *command = pid_compute_command(&temp_pid, error, 0.1f);
+
+      xQueueSend(event_queue, &cmd_event, 0);
       xQueueSend(event_queue, &temp_event, 0);
     }
     vTaskDelay(100 / portTICK_RATE_MS);
@@ -245,12 +264,17 @@ static void display_task(void* arg) {
       if(BUTTON_PRESSED == received_event.type &&
          !gpio_get_level((uint32_t) received_event.value)) {
         snprintf(tmp_buff, BUFFER_SIZE, "Button #%d Pressed\n", (uint32_t) received_event.value);
-        TFT_print(tmp_buff, 10, 100);
+        TFT_print(tmp_buff, 10, 60);
       }
       else if(TEMPERATURE_UPDATE == received_event.type) {
         const float temperature = *(float *)&received_event.value;
         snprintf(tmp_buff, BUFFER_SIZE, "Temp. = \r%.01f C\n", temperature);
         TFT_print(tmp_buff, 10, 80);
+      }
+      else if(COMMAND_UPDATE == received_event.type) {
+        const float command = *(float *)&received_event.value;
+        snprintf(tmp_buff, BUFFER_SIZE, "Cmd. = \r%.01f C\n", command);
+        TFT_print(tmp_buff, 10, 100);
       }
     }
 
