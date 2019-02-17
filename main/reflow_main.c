@@ -38,13 +38,6 @@
 #define I2C_MASTER_TX_BUF_DISABLE 0
 #define I2C_MASTER_RX_BUF_DISABLE 0
 
-//typedef enum {
-//  BUTTON_A_PRESSED,
-//  BUTTON_B_PRESSED,
-//  BUTTON_C_PRESSED,
-//  BUTTON_LEN
-//} button_t;
-
 // Global variables
 static xQueueHandle event_queue = NULL;
 
@@ -54,7 +47,8 @@ static float pid_output = 0.0f;
 typedef enum {
   BUTTON_PRESSED,
   TEMPERATURE_UPDATE,
-  DUTY_CYCLE_UPDATE
+  DUTY_CYCLE_UPDATE,
+  HEATER_UPDATE
 } event_type_t;
 
 typedef struct {
@@ -165,7 +159,6 @@ void gpio_setup() {
   };
   gpio_config(&button_conf);
 
-  event_queue = xQueueCreate(10, sizeof(event_t) + 4);
   gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
   gpio_isr_handler_add(BUTTON_A_PIN, button_handler, (void*) BUTTON_A_PIN);
   gpio_isr_handler_add(BUTTON_B_PIN, button_handler, (void*) BUTTON_B_PIN);
@@ -233,20 +226,36 @@ static void heater_task(void* arg) {
   const float period = 1000.0f;
   float on_time, off_time;
 
+  event_t heat_event = {
+      .type = HEATER_UPDATE,
+      .value = NULL
+  };
+
+  uint32_t* heat_val = (uint32_t *) &heat_event.value;
+
+
   while(1) {
     duty_cycle = pid_output / 100.0f;
     on_time = duty_cycle * period;
     off_time = period - on_time;
 
     // Turn on heaters
-    gpio_set_level(TOP_HEATER_PIN, 1);
-    gpio_set_level(BOTTOM_HEATER_PIN, 1);
-    vTaskDelay ((TickType_t) on_time / portTICK_RATE_MS);
+    if(duty_cycle > 0.05f) {
+      *heat_val = 1;
+      xQueueSend(event_queue, &heat_event, 0);
+      gpio_set_level(TOP_HEATER_PIN, 1);
+      gpio_set_level(BOTTOM_HEATER_PIN, 1);
+      vTaskDelay((TickType_t) on_time / portTICK_RATE_MS);
+    }
 
     // Turn off heaters
-    gpio_set_level(TOP_HEATER_PIN, 0);
-    gpio_set_level(BOTTOM_HEATER_PIN, 0);
-    vTaskDelay ((TickType_t) off_time / portTICK_RATE_MS);
+    if(duty_cycle < 0.95f) {
+      *heat_val = 0;
+      xQueueSend(event_queue, &heat_event, 0);
+      gpio_set_level(TOP_HEATER_PIN, 0);
+      gpio_set_level(BOTTOM_HEATER_PIN, 0);
+      vTaskDelay((TickType_t) off_time / portTICK_RATE_MS);
+    }
   }
 }
 
@@ -272,32 +281,9 @@ static void display_task(void* arg) {
 
   _fg = TFT_WHITE;
 
-  uint32_t top_level = 0;
-  uint32_t bottom_level = 1;
   event_t received_event;
 
   while (1) {
-  // Old heater code
-//    gpio_set_level(TOP_HEATER_PIN, top_level);
-//    gpio_set_level(BOTTOM_HEATER_PIN, bottom_level);
-//
-//    _fg = TFT_WHITE;
-//    TFT_print("TOP H. = ", 10, 5);
-//
-//    _fg = gpio_get_level(TOP_HEATER_PIN) ? TFT_RED : TFT_WHITE;
-//    snprintf(tmp_buff, BUFFER_SIZE, "\r%s", gpio_get_level(TOP_HEATER_PIN) ? "ON " : "OFF");
-//    TFT_print(tmp_buff, LASTX, LASTY);
-//
-//    _fg = TFT_WHITE;
-//    TFT_print("   BOT. H. = ", LASTX, LASTY);
-//
-//    _fg = gpio_get_level(BOTTOM_HEATER_PIN) ? TFT_RED : TFT_WHITE;
-//    snprintf(tmp_buff, BUFFER_SIZE, "\r%s", gpio_get_level(BOTTOM_HEATER_PIN) ? "ON " : "OFF");
-//    TFT_print(tmp_buff, LASTX, LASTY);
-//
-//    top_level = top_level ? 0 : 1;
-//    bottom_level = bottom_level ? 0 : 1;
-    _fg = TFT_WHITE;
     // Redraw GUI objects when there is an update from the event queue
     if(xQueueReceive(event_queue, &received_event, portMAX_DELAY)) {
       if(BUTTON_PRESSED == received_event.type &&
@@ -315,6 +301,14 @@ static void display_task(void* arg) {
         snprintf(tmp_buff, BUFFER_SIZE, "Duty Cycle = \r%.01f %% \n", command);
         TFT_print(tmp_buff, 10, 100);
       }
+      else if(HEATER_UPDATE == received_event.type) {
+        const uint32_t command = *(uint32_t *)&received_event.value;
+        TFT_print("Heat = ", 10, 5);
+        _fg =  command ? TFT_RED : TFT_WHITE;
+        snprintf(tmp_buff, BUFFER_SIZE, "\r%s", command ? "ON " : "OFF");
+        TFT_print(tmp_buff, LASTX, LASTY);
+        _fg = TFT_WHITE;
+      }
     }
 
 
@@ -323,6 +317,8 @@ static void display_task(void* arg) {
 
 void app_main()
 {
+  event_queue = xQueueCreate(16, sizeof(event_t) + 4);
+
   tft_setup();
   gpio_setup();
   i2c_setup();
