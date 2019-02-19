@@ -40,9 +40,9 @@
 
 // Global variables
 static xQueueHandle event_queue = NULL;
-
+static pid temp_pid;
 static float setpoint = 100.0f;
-static float pid_output = 0.0f;
+static float current_temp = 0.0f;
 
 typedef enum {
   BUTTON_PRESSED,
@@ -165,7 +165,7 @@ void gpio_setup() {
   gpio_isr_handler_add(BUTTON_C_PIN, button_handler, (void*) BUTTON_C_PIN);
 }
 
-static void control_task(void* arg) {
+static void temperature_task(void *arg) {
   // Configure thermocouple
   Mcp9600 temp_sensor = {
       .address = 0x60,
@@ -183,59 +183,56 @@ static void control_task(void* arg) {
       .type = TEMPERATURE_UPDATE,
       .value = NULL
   };
-
-  event_t cmd_event = {
-      .type = DUTY_CYCLE_UPDATE,
-      .value = NULL
-  };
-
-  float temperature = 0.0f;
-
-  pid temp_pid;
-  pid_set_gains(&temp_pid, 2.0f, 0.0f, 0.0f, 0.0f, 0.0f, false);
-
-  TickType_t last_pid_time = 0;
+  float * temp_val = (float *) &temp_event.value;
 
   while(1) {
-    const TickType_t now_time = xTaskGetTickCount();
-
-    if(ESP_OK == Mcp_get_hot_junc(&temp_sensor, (float *) &temp_event.value)) {
-      temperature = *(float *)&temp_event.value;
+    if(ESP_OK == Mcp_get_hot_junc(&temp_sensor, temp_val)) {
+      current_temp = *temp_val;
 
       xQueueSend(event_queue, &temp_event, 0);
     }
 
-    if((now_time - last_pid_time) >= 1000 / portTICK_RATE_MS) {
-      const float error = setpoint - temperature;
-
-      float* command = (float *) &cmd_event.value;
-      *command = pid_compute_command(&temp_pid, error, (now_time - last_pid_time) * portTICK_RATE_MS);
-      *command = clamp(*command, 0.0f, 100.0f);
-      pid_output = *command;
-
-      xQueueSend(event_queue, &cmd_event, 0);
-
-      last_pid_time = now_time;
-    }
     vTaskDelay(100 / portTICK_RATE_MS);
   }
 }
 
-static void heater_task(void* arg) {
-  float duty_cycle = 0.0f;
-  const float period = 1000.0f;
-  float on_time, off_time;
+static void control_task(void *arg) {
+  event_t cmd_event = {
+      .type = DUTY_CYCLE_UPDATE,
+      .value = NULL
+  };
+  float* command = (float *) &cmd_event.value;
 
   event_t heat_event = {
       .type = HEATER_UPDATE,
       .value = NULL
   };
-
   uint32_t* heat_val = (uint32_t *) &heat_event.value;
 
+  pid_set_gains(&temp_pid, 2.0f, 0.0f, 0.0f, 0.0f, 0.0f, false);
 
+  TickType_t now_time = xTaskGetTickCount();
+  TickType_t last_pid_time = now_time;
+
+  float duty_cycle = 0.0f;
+  const float period = 1000.0f;
+  float on_time, off_time;
+  float error = 0.0f;
   while(1) {
-    duty_cycle = pid_output / 100.0f;
+    now_time = xTaskGetTickCount();
+
+    // Calculate PID output
+    error = setpoint - current_temp;
+
+    *command = pid_compute_command(&temp_pid, error, (now_time - last_pid_time) * portTICK_RATE_MS);
+    *command = clamp(*command, 0.0f, 100.0f);
+
+    xQueueSend(event_queue, &cmd_event, 0);
+
+    last_pid_time = now_time;
+
+    // Perform PWM duty cycle on output
+    duty_cycle = *command / 100.0f;
     on_time = duty_cycle * period;
     off_time = period - on_time;
 
@@ -310,8 +307,6 @@ static void display_task(void* arg) {
         _fg = TFT_WHITE;
       }
     }
-
-
   }
 }
 
@@ -324,6 +319,6 @@ void app_main()
   i2c_setup();
 
   xTaskCreate(display_task, "display_task", 1024 * 2, NULL, 5, NULL);
-  xTaskCreate(control_task, "control_task", 1024 * 2, NULL, 6, NULL);
-  xTaskCreate(heater_task, "heater_task", 1024 * 2, NULL, 7, NULL);
+  xTaskCreate(temperature_task, "temperature_task", 1024 * 2, NULL, 6, NULL);
+  xTaskCreate(control_task, "control_task", 1024 * 2, NULL, 7, NULL);
 }
