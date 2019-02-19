@@ -30,12 +30,23 @@
 #define I2C_MASTER_TX_BUF_DISABLE 0
 #define I2C_MASTER_RX_BUF_DISABLE 0
 
+typedef struct {
+  lv_obj_t *setpoint_sbox;
+  lv_obj_t *p_gain_sbox;
+  lv_obj_t *i_gain_sbox;
+  lv_obj_t *d_gain_sbox;
+  lv_obj_t *temp_lbl;
+  lv_obj_t *power_lbl;
+  lv_obj_t *heat_led;
+} lv_gui_t;
+
 // Global variables
 static xQueueHandle event_queue = NULL;
 static pid temp_pid;
-static float setpoint = 100.0f;
+static float setpoint = 200.0f;
 static float current_temp = 0.0f;
 static lv_group_t * g;
+static lv_gui_t gui;
 
 typedef enum {
   TEMPERATURE_UPDATE,
@@ -155,7 +166,7 @@ static void control_task(void *arg) {
     // Calculate PID output
     error = setpoint - current_temp;
 
-    *command = pid_compute_command(&temp_pid, error, (now_time - last_pid_time) * portTICK_RATE_MS);
+    *command = pid_compute_command(&temp_pid, error, ((now_time - last_pid_time) * portTICK_RATE_MS) / 1000.0f);
     *command = clamp(*command, 0.0f, 100.0f);
 
     xQueueSend(event_queue, &cmd_event, 0);
@@ -187,7 +198,22 @@ static void control_task(void *arg) {
   }
 }
 
-static lv_obj_t * pid_gain_sbox(lv_coord_t x, lv_coord_t y) {
+static void spinbox_cb(lv_obj_t *spinbox, int32_t new_value) {
+  if(gui.p_gain_sbox == spinbox) {
+    temp_pid.p_gain_ = (float) new_value / 10;
+  }
+  else if(gui.i_gain_sbox == spinbox) {
+    temp_pid.i_gain_ = (float) new_value / 10;
+  }
+  else if(gui.d_gain_sbox == spinbox) {
+    temp_pid.d_gain_ = (float) new_value / 10;
+  }
+  else if(gui.setpoint_sbox == spinbox) {
+    setpoint = (float) new_value / 10;
+  }
+}
+
+static lv_obj_t * pid_gain_sbox(const char *label, lv_coord_t x, lv_coord_t y) {
   lv_obj_t *sbox = lv_spinbox_create(lv_scr_act(), NULL);
   lv_spinbox_set_digit_format(sbox, 3, 2);
   lv_spinbox_set_range(sbox, 0, 1000);
@@ -195,28 +221,69 @@ static lv_obj_t * pid_gain_sbox(lv_coord_t x, lv_coord_t y) {
   lv_obj_align(sbox, NULL, LV_ALIGN_IN_TOP_LEFT, 4, 0);
   lv_obj_set_pos(sbox, x, y);
   lv_group_add_obj(g, sbox);
+  lv_spinbox_set_value_changed_cb(sbox, spinbox_cb);
+
+  lv_obj_t * sbox_label = lv_label_create(lv_scr_act(), NULL);
+  lv_label_set_text(sbox_label, label);
+  lv_obj_align(sbox_label, sbox, LV_ALIGN_OUT_LEFT_MID, -10, 0);
   return sbox;
 }
 
-typedef struct {
-  lv_obj_t *p_gain_sbox;
-  lv_obj_t *i_gain_sbox;
-  lv_obj_t *d_gain_sbox;
-  lv_obj_t *temp_lbl;
-} lv_gui_t;
+static lv_obj_t * indicator_led(const char * label) {
+  /*Create a style for the LED*/
+  static lv_style_t style_led;
+  lv_style_copy(&style_led, &lv_style_pretty_color);
+  style_led.body.radius = LV_RADIUS_CIRCLE;
+  style_led.body.main_color = LV_COLOR_MAKE(0xb5, 0x0f, 0x04);
+  style_led.body.grad_color = LV_COLOR_MAKE(0x50, 0x07, 0x02);
+  style_led.body.border.color = LV_COLOR_MAKE(0xfa, 0x0f, 0x00);
+  style_led.body.border.width = 3;
+  style_led.body.border.opa = LV_OPA_30;
+  style_led.body.shadow.color = LV_COLOR_MAKE(0xb5, 0x0f, 0x04);
+  style_led.body.shadow.width = 5;
+
+  lv_obj_t *led = lv_led_create(lv_scr_act(), NULL);
+  lv_obj_set_style(led , &style_led);
+  lv_obj_align(led, NULL, LV_ALIGN_IN_TOP_RIGHT, -20, 10);
+  lv_led_off(led);
+
+  lv_obj_t * led_label = lv_label_create(lv_scr_act(), NULL);
+  lv_label_set_text(led_label, label);
+  lv_obj_align(led_label, led, LV_ALIGN_OUT_LEFT_MID, -10, 0);
+  return led;
+}
 
 static void gui_create(lv_gui_t* gui) {
-  gui->p_gain_sbox = pid_gain_sbox(20, 100);
+  gui->temp_lbl = lv_label_create(lv_scr_act(), NULL);
+  lv_obj_set_pos(gui->temp_lbl, 20, 10);
+
+  gui->setpoint_sbox = lv_spinbox_create(lv_scr_act(), NULL);
+  lv_spinbox_set_digit_format(gui->setpoint_sbox, 4, 3);
+  lv_spinbox_set_range(gui->setpoint_sbox, 0, 10000);
+  lv_obj_set_size(gui->setpoint_sbox, 70, 30);
+  lv_obj_align(gui->setpoint_sbox, NULL, LV_ALIGN_IN_TOP_LEFT, 4, 0);
+  lv_obj_set_pos(gui->setpoint_sbox, 90, 40);
+  lv_group_add_obj(g, gui->setpoint_sbox);
+  lv_spinbox_set_value_changed_cb(gui->setpoint_sbox, spinbox_cb);
+  lv_spinbox_set_value(gui->setpoint_sbox, (int32_t) setpoint * 10);
+
+  lv_obj_t * setpoint_label = lv_label_create(lv_scr_act(), NULL);
+  lv_label_set_text(setpoint_label, "Set T.");
+  lv_obj_align(setpoint_label, gui->setpoint_sbox, LV_ALIGN_OUT_LEFT_MID, -10, 0);
+
+  gui->heat_led = indicator_led("Heat");
+
+  gui->power_lbl = lv_label_create(lv_scr_act(), NULL);
+  lv_obj_set_pos(gui->power_lbl, 230, 40);
+
+  gui->p_gain_sbox = pid_gain_sbox("P", 70, 200);
   lv_spinbox_set_value(gui->p_gain_sbox, (int32_t) temp_pid.p_gain_ * 10);
 
-  gui->i_gain_sbox = pid_gain_sbox(20, 140);
+  gui->i_gain_sbox = pid_gain_sbox("I", 160, 200);
   lv_spinbox_set_value(gui->i_gain_sbox, (int32_t) temp_pid.i_gain_ * 10);
 
-  gui->d_gain_sbox = pid_gain_sbox(20, 180);
+  gui->d_gain_sbox = pid_gain_sbox("D", 250, 200);
   lv_spinbox_set_value(gui->d_gain_sbox, (int32_t) temp_pid.d_gain_ * 10);
-
-  gui->temp_lbl = lv_label_create(lv_scr_act(), NULL);
-  lv_obj_set_pos(gui->temp_lbl, 20, 40);
 }
 
 static void gui_update_task(void* arg) {
@@ -230,15 +297,22 @@ static void gui_update_task(void* arg) {
     if(xQueueReceive(event_queue, &received_event, portMAX_DELAY)) {
       if(TEMPERATURE_UPDATE == received_event.type) {
         const float temperature = *(float *)&received_event.value;
-        snprintf(tmp_buff, BUFFER_SIZE, "Temp. = %.01f C\n", temperature);
+        snprintf(tmp_buff, BUFFER_SIZE, "Temp. = %.01f C", temperature);
         lv_label_set_text(gui->temp_lbl, tmp_buff);
       }
       else if(DUTY_CYCLE_UPDATE == received_event.type) {
         const float command = *(float *)&received_event.value;
-        snprintf(tmp_buff, BUFFER_SIZE, "Duty Cycle = \r%.01f %% \n", command);
+        snprintf(tmp_buff, BUFFER_SIZE, "%.01f %%", command);
+        lv_label_set_text(gui->power_lbl, tmp_buff);
       }
       else if(HEATER_UPDATE == received_event.type) {
         const uint32_t command = *(uint32_t *)&received_event.value;
+        if(command) {
+          lv_led_on(gui->heat_led);
+        }
+        else {
+          lv_led_off(gui->heat_led);
+        }
       }
     }
   }
@@ -247,7 +321,7 @@ static void gui_update_task(void* arg) {
 void app_main()
 {
   event_queue = xQueueCreate(16, sizeof(event_t) + 4);
-  pid_set_gains(&temp_pid, 2.0f, 0.0f, 1.0f, 0.0f, 0.0f, false);
+  pid_set_gains(&temp_pid, 8.0f, 6.0f, 5.0f, -50.0f, 50.0f, false);
 
   gpio_setup();
   i2c_setup();
@@ -261,7 +335,6 @@ void app_main()
 
   lvgl_setup();
 
-  lv_gui_t gui;
   gui_create(&gui);
 
   xTaskCreate(gui_update_task, "gui_update_task", 1024 * 2, (void *) &gui, 5, NULL);
