@@ -1,32 +1,24 @@
 #include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "driver/gpio.h"
-#include "driver/i2c.h"
-#include "sdkconfig.h"
-#include "tftspi.h"
-#include "tft.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <driver/gpio.h>
+#include <driver/i2c.h>
+#include <lvgl/lvgl.h>
+#include <drv/disp_spi.h>
+#include <drv/ili9341.h>
+#include <drv/m5stack_kpad.h>
+#include <esp_freertos_hooks.h>
 #include "mcp9600.h"
 #include "pid.h"
-
-// ==========================================================
-// Define which spi bus to use TFT_VSPI_HOST or TFT_HSPI_HOST
-#define SPI_BUS TFT_HSPI_HOST
-// ==========================================================
+#include "../cmake-build-debug/config/sdkconfig.h"
 
 #define BUFFER_SIZE 128
 
 // GPIO Settings
 #define TOP_HEATER_PIN 16
 #define BOTTOM_HEATER_PIN 17
-#define BUTTON_A_PIN 39
-#define BUTTON_B_PIN 38
-#define BUTTON_C_PIN 37
-
-#define BUTTON_DEBOUNCING_TICKS 200
-#define ESP_INTR_FLAG_DEFAULT 0
 
 // I2C Settings
 #define I2C_MASTER_SCL 22
@@ -38,14 +30,25 @@
 #define I2C_MASTER_TX_BUF_DISABLE 0
 #define I2C_MASTER_RX_BUF_DISABLE 0
 
+typedef struct {
+  lv_obj_t *setpoint_sbox;
+  lv_obj_t *p_gain_sbox;
+  lv_obj_t *i_gain_sbox;
+  lv_obj_t *d_gain_sbox;
+  lv_obj_t *temp_lbl;
+  lv_obj_t *power_lbl;
+  lv_obj_t *heat_led;
+} lv_gui_t;
+
 // Global variables
 static xQueueHandle event_queue = NULL;
 static pid temp_pid;
-static float setpoint = 100.0f;
+static float setpoint = 200.0f;
 static float current_temp = 0.0f;
+static lv_group_t * g;
+static lv_gui_t gui;
 
 typedef enum {
-  BUTTON_PRESSED,
   TEMPERATURE_UPDATE,
   DUTY_CYCLE_UPDATE,
   HEATER_UPDATE
@@ -56,21 +59,8 @@ typedef struct {
   void* value;
 } event_t;
 
-static void IRAM_ATTR button_handler(void* arg) {
-  static TickType_t last_time = 0;
-  const TickType_t now_time = xTaskGetTickCountFromISR();
-
-  event_t event = {
-      .type = BUTTON_PRESSED,
-      .value = arg
-  };
-
-  // Button debouncing
-  if(!gpio_get_level((uint32_t) arg) &&
-      (now_time - last_time) > BUTTON_DEBOUNCING_TICKS) {
-    xQueueSendFromISR(event_queue, &event, NULL);
-  }
-  last_time = now_time;
+static void IRAM_ATTR lv_tick_task(void) {
+  lv_tick_inc(portTICK_RATE_MS);
 }
 
 static esp_err_t i2c_setup()
@@ -89,57 +79,6 @@ static esp_err_t i2c_setup()
                             I2C_MASTER_TX_BUF_DISABLE, 0);
 }
 
-void tft_setup() {
-  esp_err_t ret;
-
-  tft_disp_type = DEFAULT_DISP_TYPE;
-  _width = DEFAULT_TFT_DISPLAY_WIDTH;  // smaller dimension
-  _height = DEFAULT_TFT_DISPLAY_HEIGHT; // larger dimension
-  max_rdclock = 8000000;
-
-  TFT_PinsInit();
-
-  spi_lobo_device_handle_t spi;
-
-  spi_lobo_bus_config_t buscfg = {
-      .miso_io_num=PIN_NUM_MISO,				// set SPI MISO pin
-      .mosi_io_num=PIN_NUM_MOSI,				// set SPI MOSI pin
-      .sclk_io_num=PIN_NUM_CLK,				// set SPI CLK pin
-      .quadwp_io_num=-1,
-      .quadhd_io_num=-1,
-      .max_transfer_sz = 6*1024,
-  };
-
-  spi_lobo_device_interface_config_t devcfg = {
-      .clock_speed_hz=8000000,                // Initial clock out at 8 MHz
-      .mode=0,                                // SPI mode 0
-      .spics_io_num=-1,                       // we will use external CS pin
-      .spics_ext_io_num=PIN_NUM_CS,           // external CS pin
-      .flags=LB_SPI_DEVICE_HALFDUPLEX,        // ALWAYS SET  to HALF DUPLEX MODE!! for display spi
-  };
-
-  vTaskDelay(500 / portTICK_RATE_MS);
-
-  // ==== Initialize the SPI bus and attach the LCD to the SPI bus ====
-
-  ret = spi_lobo_bus_add_device(SPI_BUS, &buscfg, &devcfg, &spi);
-  assert(ret == ESP_OK);
-
-  disp_spi = spi;
-
-  // ==== Test select/deselect ====
-  ret = spi_lobo_device_select(spi, 1);
-  assert(ret == ESP_OK);
-
-  ret = spi_lobo_device_deselect(spi);
-  assert(ret == ESP_OK);
-
-  // ==== Initialize the Display ====
-  TFT_display_init();
-
-  spi_lobo_set_speed(spi, DEFAULT_SPI_CLOCK);
-}
-
 void gpio_setup() {
   gpio_config_t heater_conf = {
       .intr_type = GPIO_PIN_INTR_DISABLE,
@@ -149,20 +88,25 @@ void gpio_setup() {
       .pull_up_en = 0
   };
   gpio_config(&heater_conf);
+}
 
-  gpio_config_t button_conf = {
-      .intr_type = GPIO_PIN_INTR_NEGEDGE,
-      .mode = GPIO_MODE_INPUT,
-      .pin_bit_mask = (1ULL<<BUTTON_A_PIN) | (1ULL<<BUTTON_B_PIN) | (1ULL<<BUTTON_C_PIN),
-      .pull_down_en = 0,
-      .pull_up_en = 0
-  };
-  gpio_config(&button_conf);
+void lvgl_setup() {
+  lv_disp_drv_t disp;
+  lv_disp_drv_init(&disp);
+  disp.disp_flush = ili9431_flush;
+  disp.disp_fill = ili9431_fill;
+  lv_disp_drv_register(&disp);
 
-  gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
-  gpio_isr_handler_add(BUTTON_A_PIN, button_handler, (void*) BUTTON_A_PIN);
-  gpio_isr_handler_add(BUTTON_B_PIN, button_handler, (void*) BUTTON_B_PIN);
-  gpio_isr_handler_add(BUTTON_C_PIN, button_handler, (void*) BUTTON_C_PIN);
+  lv_indev_drv_t indev;
+  lv_indev_drv_init(&indev);
+  indev.read = m5stack_enc_read;
+  indev.type = LV_INDEV_TYPE_ENCODER;
+  lv_indev_t * m5stack_kpad_indev = lv_indev_drv_register(&indev);
+
+  g = lv_group_create();
+  lv_indev_set_group(m5stack_kpad_indev, g);
+
+  esp_register_freertos_tick_hook(lv_tick_task);
 }
 
 static void temperature_task(void *arg) {
@@ -209,8 +153,6 @@ static void control_task(void *arg) {
   };
   uint32_t* heat_val = (uint32_t *) &heat_event.value;
 
-  pid_set_gains(&temp_pid, 2.0f, 0.0f, 0.0f, 0.0f, 0.0f, false);
-
   TickType_t now_time = xTaskGetTickCount();
   TickType_t last_pid_time = now_time;
 
@@ -224,7 +166,7 @@ static void control_task(void *arg) {
     // Calculate PID output
     error = setpoint - current_temp;
 
-    *command = pid_compute_command(&temp_pid, error, (now_time - last_pid_time) * portTICK_RATE_MS);
+    *command = pid_compute_command(&temp_pid, error, ((now_time - last_pid_time) * portTICK_RATE_MS) / 1000.0f);
     *command = clamp(*command, 0.0f, 100.0f);
 
     xQueueSend(event_queue, &cmd_event, 0);
@@ -256,55 +198,121 @@ static void control_task(void *arg) {
   }
 }
 
-static void display_task(void* arg) {
+static void spinbox_cb(lv_obj_t *spinbox, int32_t new_value) {
+  if(gui.p_gain_sbox == spinbox) {
+    temp_pid.p_gain_ = (float) new_value / 10;
+  }
+  else if(gui.i_gain_sbox == spinbox) {
+    temp_pid.i_gain_ = (float) new_value / 10;
+  }
+  else if(gui.d_gain_sbox == spinbox) {
+    temp_pid.d_gain_ = (float) new_value / 10;
+  }
+  else if(gui.setpoint_sbox == spinbox) {
+    setpoint = (float) new_value / 10;
+  }
+}
 
+static lv_obj_t * pid_gain_sbox(const char *label, lv_coord_t x, lv_coord_t y) {
+  lv_obj_t *sbox = lv_spinbox_create(lv_scr_act(), NULL);
+  lv_spinbox_set_digit_format(sbox, 3, 2);
+  lv_spinbox_set_range(sbox, 0, 1000);
+  lv_obj_set_size(sbox, 60, 30);
+  lv_obj_align(sbox, NULL, LV_ALIGN_IN_TOP_LEFT, 4, 0);
+  lv_obj_set_pos(sbox, x, y);
+  lv_group_add_obj(g, sbox);
+  lv_spinbox_set_value_changed_cb(sbox, spinbox_cb);
+
+  lv_obj_t * sbox_label = lv_label_create(lv_scr_act(), NULL);
+  lv_label_set_text(sbox_label, label);
+  lv_obj_align(sbox_label, sbox, LV_ALIGN_OUT_LEFT_MID, -10, 0);
+  return sbox;
+}
+
+static lv_obj_t * indicator_led(const char * label) {
+  /*Create a style for the LED*/
+  static lv_style_t style_led;
+  lv_style_copy(&style_led, &lv_style_pretty_color);
+  style_led.body.radius = LV_RADIUS_CIRCLE;
+  style_led.body.main_color = LV_COLOR_MAKE(0xb5, 0x0f, 0x04);
+  style_led.body.grad_color = LV_COLOR_MAKE(0x50, 0x07, 0x02);
+  style_led.body.border.color = LV_COLOR_MAKE(0xfa, 0x0f, 0x00);
+  style_led.body.border.width = 3;
+  style_led.body.border.opa = LV_OPA_30;
+  style_led.body.shadow.color = LV_COLOR_MAKE(0xb5, 0x0f, 0x04);
+  style_led.body.shadow.width = 5;
+
+  lv_obj_t *led = lv_led_create(lv_scr_act(), NULL);
+  lv_obj_set_style(led , &style_led);
+  lv_obj_align(led, NULL, LV_ALIGN_IN_TOP_RIGHT, -20, 10);
+  lv_led_off(led);
+
+  lv_obj_t * led_label = lv_label_create(lv_scr_act(), NULL);
+  lv_label_set_text(led_label, label);
+  lv_obj_align(led_label, led, LV_ALIGN_OUT_LEFT_MID, -10, 0);
+  return led;
+}
+
+static void gui_create(lv_gui_t* gui) {
+  gui->temp_lbl = lv_label_create(lv_scr_act(), NULL);
+  lv_obj_set_pos(gui->temp_lbl, 20, 10);
+
+  gui->setpoint_sbox = lv_spinbox_create(lv_scr_act(), NULL);
+  lv_spinbox_set_digit_format(gui->setpoint_sbox, 4, 3);
+  lv_spinbox_set_range(gui->setpoint_sbox, 0, 10000);
+  lv_obj_set_size(gui->setpoint_sbox, 70, 30);
+  lv_obj_align(gui->setpoint_sbox, NULL, LV_ALIGN_IN_TOP_LEFT, 4, 0);
+  lv_obj_set_pos(gui->setpoint_sbox, 90, 40);
+  lv_group_add_obj(g, gui->setpoint_sbox);
+  lv_spinbox_set_value_changed_cb(gui->setpoint_sbox, spinbox_cb);
+  lv_spinbox_set_value(gui->setpoint_sbox, (int32_t) setpoint * 10);
+
+  lv_obj_t * setpoint_label = lv_label_create(lv_scr_act(), NULL);
+  lv_label_set_text(setpoint_label, "Set T.");
+  lv_obj_align(setpoint_label, gui->setpoint_sbox, LV_ALIGN_OUT_LEFT_MID, -10, 0);
+
+  gui->heat_led = indicator_led("Heat");
+
+  gui->power_lbl = lv_label_create(lv_scr_act(), NULL);
+  lv_obj_set_pos(gui->power_lbl, 230, 40);
+
+  gui->p_gain_sbox = pid_gain_sbox("P", 70, 200);
+  lv_spinbox_set_value(gui->p_gain_sbox, (int32_t) temp_pid.p_gain_ * 10);
+
+  gui->i_gain_sbox = pid_gain_sbox("I", 160, 200);
+  lv_spinbox_set_value(gui->i_gain_sbox, (int32_t) temp_pid.i_gain_ * 10);
+
+  gui->d_gain_sbox = pid_gain_sbox("D", 250, 200);
+  lv_spinbox_set_value(gui->d_gain_sbox, (int32_t) temp_pid.d_gain_ * 10);
+}
+
+static void gui_update_task(void* arg) {
+  lv_gui_t* gui = (lv_gui_t*) arg;
 
   char tmp_buff[BUFFER_SIZE];
-
-  font_rotate = 0;
-  text_wrap = 0;
-  font_transparent = 0;
-  font_forceFixed = 0;
-  TFT_resetclipwin();
-
-  image_debug = 0;
-
-  gray_scale = 0;
-
-  TFT_setRotation(LANDSCAPE);
-  const int tempy = TFT_getfontheight() + 8;
-
-  TFT_setFont(DEJAVU18_FONT, NULL);
-
-  _fg = TFT_WHITE;
-
   event_t received_event;
 
   while (1) {
     // Redraw GUI objects when there is an update from the event queue
     if(xQueueReceive(event_queue, &received_event, portMAX_DELAY)) {
-      if(BUTTON_PRESSED == received_event.type &&
-         !gpio_get_level((uint32_t) received_event.value)) {
-        snprintf(tmp_buff, BUFFER_SIZE, "Button #%d Pressed\n", (uint32_t) received_event.value);
-        TFT_print(tmp_buff, 10, 60);
-      }
-      else if(TEMPERATURE_UPDATE == received_event.type) {
+      if(TEMPERATURE_UPDATE == received_event.type) {
         const float temperature = *(float *)&received_event.value;
-        snprintf(tmp_buff, BUFFER_SIZE, "Temp. = \r%.01f C\n", temperature);
-        TFT_print(tmp_buff, 10, 80);
+        snprintf(tmp_buff, BUFFER_SIZE, "Temp. = %.01f C", temperature);
+        lv_label_set_text(gui->temp_lbl, tmp_buff);
       }
       else if(DUTY_CYCLE_UPDATE == received_event.type) {
         const float command = *(float *)&received_event.value;
-        snprintf(tmp_buff, BUFFER_SIZE, "Duty Cycle = \r%.01f %% \n", command);
-        TFT_print(tmp_buff, 10, 100);
+        snprintf(tmp_buff, BUFFER_SIZE, "%.01f %%", command);
+        lv_label_set_text(gui->power_lbl, tmp_buff);
       }
       else if(HEATER_UPDATE == received_event.type) {
         const uint32_t command = *(uint32_t *)&received_event.value;
-        TFT_print("Heat = ", 10, 5);
-        _fg =  command ? TFT_RED : TFT_WHITE;
-        snprintf(tmp_buff, BUFFER_SIZE, "\r%s", command ? "ON " : "OFF");
-        TFT_print(tmp_buff, LASTX, LASTY);
-        _fg = TFT_WHITE;
+        if(command) {
+          lv_led_on(gui->heat_led);
+        }
+        else {
+          lv_led_off(gui->heat_led);
+        }
       }
     }
   }
@@ -313,12 +321,28 @@ static void display_task(void* arg) {
 void app_main()
 {
   event_queue = xQueueCreate(16, sizeof(event_t) + 4);
+  pid_set_gains(&temp_pid, 8.0f, 6.0f, 5.0f, -50.0f, 50.0f, false);
 
-  tft_setup();
   gpio_setup();
   i2c_setup();
 
-  xTaskCreate(display_task, "display_task", 1024 * 2, NULL, 5, NULL);
+  lv_init();
+
+  disp_spi_init();
+  ili9431_init();
+
+  m5stack_kpad_init();
+
+  lvgl_setup();
+
+  gui_create(&gui);
+
+  xTaskCreate(gui_update_task, "gui_update_task", 1024 * 2, (void *) &gui, 5, NULL);
   xTaskCreate(temperature_task, "temperature_task", 1024 * 2, NULL, 6, NULL);
   xTaskCreate(control_task, "control_task", 1024 * 2, NULL, 7, NULL);
+
+  while (1) {
+    vTaskDelay(1);
+    lv_task_handler();
+  }
 }
