@@ -10,6 +10,7 @@
 #include <drv/ili9341.h>
 #include <drv/m5stack_kpad.h>
 #include <esp_freertos_hooks.h>
+#include <lv_style.h>
 #include "mcp9600.h"
 #include "pid.h"
 #include "../cmake-build-debug/config/sdkconfig.h"
@@ -38,6 +39,9 @@ typedef struct {
   lv_obj_t *temp_lbl;
   lv_obj_t *power_lbl;
   lv_obj_t *heat_led;
+  lv_obj_t *temp_chart;
+  lv_chart_series_t * temp_curve;
+  lv_chart_series_t * setpoint_curve;
 } lv_gui_t;
 
 // Global variables
@@ -157,7 +161,7 @@ static void control_task(void *arg) {
   TickType_t last_pid_time = now_time;
 
   float duty_cycle = 0.0f;
-  const float period = 1000.0f;
+  const float period = 500.0f;
   float on_time, off_time;
   float error = 0.0f;
   while(1) {
@@ -253,13 +257,36 @@ static lv_obj_t * indicator_led(const char * label) {
   return led;
 }
 
+static lv_obj_t * temperature_chart() {
+  /*Create a style for the chart*/
+  static lv_style_t style;
+  lv_style_copy(&style, &lv_style_pretty);
+  style.body.shadow.width = 0;
+  style.body.shadow.color = LV_COLOR_MAKE(0x40,0x40,0x40);
+  style.line.color = LV_COLOR_MAKE(0x40,0x40,0x40);
+  style.line.width = 1;
+
+  /*Create a chart*/
+  lv_obj_t * chart;
+  chart = lv_chart_create(lv_scr_act(), NULL);
+  lv_obj_set_size(chart, 300, 120);
+  lv_chart_set_style(chart, &style);
+  lv_obj_align(chart, NULL, LV_ALIGN_CENTER, 0, 15);
+  lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
+  lv_chart_set_series_opa(chart, LV_OPA_70);                            /*Opacity of the data series*/
+  lv_chart_set_series_width(chart, 2);                                  /*Line width and point radious*/
+  lv_chart_set_range(chart, 0, 300);
+  lv_chart_set_point_count(chart, 600);
+  return chart;
+}
+
 static void gui_create(lv_gui_t* gui) {
   gui->temp_lbl = lv_label_create(lv_scr_act(), NULL);
   lv_obj_set_pos(gui->temp_lbl, 20, 10);
 
   gui->setpoint_sbox = lv_spinbox_create(lv_scr_act(), NULL);
   lv_spinbox_set_digit_format(gui->setpoint_sbox, 4, 3);
-  lv_spinbox_set_range(gui->setpoint_sbox, 0, 10000);
+  lv_spinbox_set_range(gui->setpoint_sbox, 0, 3000);
   lv_obj_set_size(gui->setpoint_sbox, 70, 30);
   lv_obj_align(gui->setpoint_sbox, NULL, LV_ALIGN_IN_TOP_LEFT, 4, 0);
   lv_obj_set_pos(gui->setpoint_sbox, 90, 40);
@@ -276,6 +303,10 @@ static void gui_create(lv_gui_t* gui) {
   gui->power_lbl = lv_label_create(lv_scr_act(), NULL);
   lv_obj_set_pos(gui->power_lbl, 230, 40);
 
+  gui->temp_chart = temperature_chart();
+  gui->temp_curve = lv_chart_add_series(gui->temp_chart, LV_COLOR_RED);
+  gui->setpoint_curve = lv_chart_add_series(gui->temp_chart, LV_COLOR_GREEN);
+
   gui->p_gain_sbox = pid_gain_sbox("P", 70, 200);
   lv_spinbox_set_value(gui->p_gain_sbox, (int32_t) temp_pid.p_gain_ * 10);
 
@@ -291,6 +322,7 @@ static void gui_update_task(void* arg) {
 
   char tmp_buff[BUFFER_SIZE];
   event_t received_event;
+  int temp_chart_points = 0;
 
   while (1) {
     // Redraw GUI objects when there is an update from the event queue
@@ -299,6 +331,17 @@ static void gui_update_task(void* arg) {
         const float temperature = *(float *)&received_event.value;
         snprintf(tmp_buff, BUFFER_SIZE, "Temp. = %.01f C", temperature);
         lv_label_set_text(gui->temp_lbl, tmp_buff);
+
+        if(/*temp_chart_points >= 10*/true) {
+          lv_chart_set_next(gui->temp_chart, gui->temp_curve, (lv_coord_t) temperature);
+          lv_chart_set_next(gui->temp_chart, gui->setpoint_curve, (lv_coord_t) setpoint);
+          lv_chart_refresh(gui->temp_chart);
+          temp_chart_points = 0;
+        }
+        else {
+          temp_chart_points++;
+        }
+
       }
       else if(DUTY_CYCLE_UPDATE == received_event.type) {
         const float command = *(float *)&received_event.value;
