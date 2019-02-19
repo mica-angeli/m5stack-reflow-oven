@@ -60,7 +60,10 @@ typedef enum {
 
 typedef struct {
   event_type_t type;
-  void* value;
+  union {
+    float float_val;
+    int32_t int_val;
+  } value ;
 } event_t;
 
 static void IRAM_ATTR lv_tick_task(void) {
@@ -127,15 +130,12 @@ static void temperature_task(void *arg) {
   };
   Mcp_configure(&temp_sensor);
 
-  event_t temp_event = {
-      .type = TEMPERATURE_UPDATE,
-      .value = NULL
-  };
-  float * temp_val = (float *) &temp_event.value;
+  event_t temp_event;
+  temp_event.type = TEMPERATURE_UPDATE;
 
   while(1) {
-    if(ESP_OK == Mcp_get_hot_junc(&temp_sensor, temp_val)) {
-      current_temp = *temp_val;
+    if(ESP_OK == Mcp_get_hot_junc(&temp_sensor, &temp_event.value.float_val)) {
+      current_temp = temp_event.value.float_val;
 
       xQueueSend(event_queue, &temp_event, 0);
     }
@@ -145,17 +145,11 @@ static void temperature_task(void *arg) {
 }
 
 static void control_task(void *arg) {
-  event_t cmd_event = {
-      .type = DUTY_CYCLE_UPDATE,
-      .value = NULL
-  };
-  float* command = (float *) &cmd_event.value;
+  event_t cmd_event;
+  cmd_event.type = DUTY_CYCLE_UPDATE;
 
-  event_t heat_event = {
-      .type = HEATER_UPDATE,
-      .value = NULL
-  };
-  uint32_t* heat_val = (uint32_t *) &heat_event.value;
+  event_t heat_event;
+  heat_event.type = HEATER_UPDATE;
 
   TickType_t now_time = xTaskGetTickCount();
   TickType_t last_pid_time = now_time;
@@ -170,21 +164,21 @@ static void control_task(void *arg) {
     // Calculate PID output
     error = setpoint - current_temp;
 
-    *command = pid_compute_command(&temp_pid, error, ((now_time - last_pid_time) * portTICK_RATE_MS) / 1000.0f);
-    *command = clamp(*command, 0.0f, 100.0f);
+    cmd_event.value.float_val = pid_compute_command(&temp_pid, error, ((now_time - last_pid_time) * portTICK_RATE_MS) / 1000.0f);
+    cmd_event.value.float_val = clamp(cmd_event.value.float_val, 0.0f, 100.0f);
 
     xQueueSend(event_queue, &cmd_event, 0);
 
     last_pid_time = now_time;
 
     // Perform PWM duty cycle on output
-    duty_cycle = *command / 100.0f;
+    duty_cycle = cmd_event.value.float_val / 100.0f;
     on_time = duty_cycle * period;
     off_time = period - on_time;
 
     // Turn on heaters
     if(duty_cycle > 0.05f) {
-      *heat_val = 1;
+      heat_event.value.int_val = 1;
       xQueueSend(event_queue, &heat_event, 0);
       gpio_set_level(TOP_HEATER_PIN, 1);
       gpio_set_level(BOTTOM_HEATER_PIN, 1);
@@ -193,7 +187,7 @@ static void control_task(void *arg) {
 
     // Turn off heaters
     if(duty_cycle < 0.95f) {
-      *heat_val = 0;
+      heat_event.value.int_val = 0;
       xQueueSend(event_queue, &heat_event, 0);
       gpio_set_level(TOP_HEATER_PIN, 0);
       gpio_set_level(BOTTOM_HEATER_PIN, 0);
@@ -322,34 +316,26 @@ static void gui_update_task(void* arg) {
 
   char tmp_buff[BUFFER_SIZE];
   event_t received_event;
-  int temp_chart_points = 0;
 
   while (1) {
     // Redraw GUI objects when there is an update from the event queue
     if(xQueueReceive(event_queue, &received_event, portMAX_DELAY)) {
       if(TEMPERATURE_UPDATE == received_event.type) {
-        const float temperature = *(float *)&received_event.value;
+        const float temperature = received_event.value.float_val;
         snprintf(tmp_buff, BUFFER_SIZE, "Temp. = %.01f C", temperature);
         lv_label_set_text(gui->temp_lbl, tmp_buff);
 
-        if(/*temp_chart_points >= 10*/true) {
-          lv_chart_set_next(gui->temp_chart, gui->temp_curve, (lv_coord_t) temperature);
-          lv_chart_set_next(gui->temp_chart, gui->setpoint_curve, (lv_coord_t) setpoint);
-          lv_chart_refresh(gui->temp_chart);
-          temp_chart_points = 0;
-        }
-        else {
-          temp_chart_points++;
-        }
-
+        lv_chart_set_next(gui->temp_chart, gui->temp_curve, (lv_coord_t) temperature);
+        lv_chart_set_next(gui->temp_chart, gui->setpoint_curve, (lv_coord_t) setpoint);
+        lv_chart_refresh(gui->temp_chart);
       }
       else if(DUTY_CYCLE_UPDATE == received_event.type) {
-        const float command = *(float *)&received_event.value;
+        const float command = received_event.value.float_val;
         snprintf(tmp_buff, BUFFER_SIZE, "%.01f %%", command);
         lv_label_set_text(gui->power_lbl, tmp_buff);
       }
       else if(HEATER_UPDATE == received_event.type) {
-        const uint32_t command = *(uint32_t *)&received_event.value;
+        const int32_t command = received_event.value.int_val;
         if(command) {
           lv_led_on(gui->heat_led);
         }
@@ -363,7 +349,7 @@ static void gui_update_task(void* arg) {
 
 void app_main()
 {
-  event_queue = xQueueCreate(16, sizeof(event_t) + 4);
+  event_queue = xQueueCreate(16, sizeof(event_t));
   pid_set_gains(&temp_pid, 8.0f, 6.0f, 5.0f, -50.0f, 50.0f, false);
 
   gpio_setup();
