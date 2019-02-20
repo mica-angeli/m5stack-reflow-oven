@@ -13,6 +13,7 @@
 #include <lv_style.h>
 #include "mcp9600.h"
 #include "pid.h"
+#include "lv_screen.h"
 #include "../cmake-build-debug/config/sdkconfig.h"
 
 #define BUFFER_SIZE 128
@@ -51,6 +52,7 @@ static float setpoint = 200.0f;
 static float current_temp = 0.0f;
 static lv_group_t * g;
 static lv_gui_t gui;
+static lv_screen_t * tune_pid_scr;
 
 typedef enum {
   TEMPERATURE_UPDATE,
@@ -211,60 +213,37 @@ static void spinbox_cb(lv_obj_t *spinbox, int32_t new_value) {
   }
 }
 
-static lv_obj_t * pid_gain_sbox(const char *label, lv_coord_t x, lv_coord_t y) {
-  lv_obj_t *sbox = lv_spinbox_create(lv_scr_act(), NULL);
+static lv_obj_t * pid_gain_sbox(lv_obj_t * par, const char *label, lv_coord_t x, lv_coord_t y) {
+  lv_obj_t *sbox = lv_spinbox_create(par, NULL);
   lv_spinbox_set_digit_format(sbox, 3, 2);
   lv_spinbox_set_range(sbox, 0, 1000);
   lv_obj_set_size(sbox, 60, 30);
   lv_obj_align(sbox, NULL, LV_ALIGN_IN_TOP_LEFT, 4, 0);
   lv_obj_set_pos(sbox, x, y);
-  lv_group_add_obj(g, sbox);
   lv_spinbox_set_value_changed_cb(sbox, spinbox_cb);
 
-  lv_obj_t * sbox_label = lv_label_create(lv_scr_act(), NULL);
+  lv_obj_t * sbox_label = lv_label_create(par, NULL);
   lv_label_set_text(sbox_label, label);
   lv_obj_align(sbox_label, sbox, LV_ALIGN_OUT_LEFT_MID, -10, 0);
   return sbox;
 }
 
-static lv_obj_t * indicator_led(const char * label) {
-  /*Create a style for the LED*/
-  static lv_style_t style_led;
-  lv_style_copy(&style_led, &lv_style_pretty_color);
-  style_led.body.radius = LV_RADIUS_CIRCLE;
-  style_led.body.main_color = LV_COLOR_MAKE(0xb5, 0x0f, 0x04);
-  style_led.body.grad_color = LV_COLOR_MAKE(0x50, 0x07, 0x02);
-  style_led.body.border.color = LV_COLOR_MAKE(0xfa, 0x0f, 0x00);
-  style_led.body.border.width = 3;
-  style_led.body.border.opa = LV_OPA_30;
-  style_led.body.shadow.color = LV_COLOR_MAKE(0xb5, 0x0f, 0x04);
-  style_led.body.shadow.width = 5;
-
-  lv_obj_t *led = lv_led_create(lv_scr_act(), NULL);
-  lv_obj_set_style(led , &style_led);
+static lv_obj_t * indicator_led(lv_obj_t * par, const char * label) {
+  lv_obj_t *led = lv_led_create(par, NULL);
   lv_obj_align(led, NULL, LV_ALIGN_IN_TOP_RIGHT, -20, 10);
   lv_led_off(led);
 
-  lv_obj_t * led_label = lv_label_create(lv_scr_act(), NULL);
+  lv_obj_t * led_label = lv_label_create(par, NULL);
   lv_label_set_text(led_label, label);
   lv_obj_align(led_label, led, LV_ALIGN_OUT_LEFT_MID, -10, 0);
   return led;
 }
 
-static lv_obj_t * temperature_chart() {
-  /*Create a style for the chart*/
-  static lv_style_t style;
-  lv_style_copy(&style, &lv_style_pretty);
-  style.body.shadow.width = 0;
-  style.body.shadow.color = LV_COLOR_MAKE(0x40,0x40,0x40);
-  style.line.color = LV_COLOR_MAKE(0x40,0x40,0x40);
-  style.line.width = 1;
-
+static lv_obj_t * temperature_chart(lv_obj_t * par) {
   /*Create a chart*/
   lv_obj_t * chart;
-  chart = lv_chart_create(lv_scr_act(), NULL);
+  chart = lv_chart_create(par, NULL);
   lv_obj_set_size(chart, 300, 120);
-  lv_chart_set_style(chart, &style);
   lv_obj_align(chart, NULL, LV_ALIGN_CENTER, 0, 15);
   lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
   lv_chart_set_series_opa(chart, LV_OPA_70);                            /*Opacity of the data series*/
@@ -275,44 +254,53 @@ static lv_obj_t * temperature_chart() {
 }
 
 static void gui_create(lv_gui_t* gui) {
-  gui->temp_lbl = lv_label_create(lv_scr_act(), NULL);
-  lv_obj_set_pos(gui->temp_lbl, 20, 10);
+  tune_pid_scr = lv_screen_create(g);
 
-  gui->setpoint_sbox = lv_spinbox_create(lv_scr_act(), NULL);
+  gui->temp_lbl = lv_label_create(tune_pid_scr->screen, NULL);
+  lv_obj_set_pos(gui->temp_lbl, 20, 10);
+  lv_label_set_text(gui->temp_lbl, "Temp. = N/A");
+
+  gui->setpoint_sbox = lv_spinbox_create(tune_pid_scr->screen, NULL);
   lv_spinbox_set_digit_format(gui->setpoint_sbox, 4, 3);
   lv_spinbox_set_range(gui->setpoint_sbox, 0, 3000);
   lv_obj_set_size(gui->setpoint_sbox, 70, 30);
   lv_obj_align(gui->setpoint_sbox, NULL, LV_ALIGN_IN_TOP_LEFT, 4, 0);
   lv_obj_set_pos(gui->setpoint_sbox, 90, 40);
-  lv_group_add_obj(g, gui->setpoint_sbox);
   lv_spinbox_set_value_changed_cb(gui->setpoint_sbox, spinbox_cb);
-  lv_spinbox_set_value(gui->setpoint_sbox, (int32_t) setpoint * 10);
+  lv_screen_add_object(tune_pid_scr, gui->setpoint_sbox);
 
-  lv_obj_t * setpoint_label = lv_label_create(lv_scr_act(), NULL);
+  lv_obj_t * setpoint_label = lv_label_create(tune_pid_scr->screen, NULL);
   lv_label_set_text(setpoint_label, "Set T.");
   lv_obj_align(setpoint_label, gui->setpoint_sbox, LV_ALIGN_OUT_LEFT_MID, -10, 0);
 
-  gui->heat_led = indicator_led("Heat");
+  gui->heat_led = indicator_led(tune_pid_scr->screen, "Heat");
 
-  gui->power_lbl = lv_label_create(lv_scr_act(), NULL);
+  gui->power_lbl = lv_label_create(tune_pid_scr->screen, NULL);
   lv_obj_set_pos(gui->power_lbl, 230, 40);
 
-  gui->temp_chart = temperature_chart();
+  gui->temp_chart = temperature_chart(tune_pid_scr->screen);
   gui->temp_curve = lv_chart_add_series(gui->temp_chart, LV_COLOR_RED);
   gui->setpoint_curve = lv_chart_add_series(gui->temp_chart, LV_COLOR_GREEN);
 
-  gui->p_gain_sbox = pid_gain_sbox("P", 70, 200);
-  lv_spinbox_set_value(gui->p_gain_sbox, (int32_t) temp_pid.p_gain_ * 10);
+  gui->p_gain_sbox = pid_gain_sbox(tune_pid_scr->screen, "P", 70, 200);
+  lv_screen_add_object(tune_pid_scr, gui->p_gain_sbox);
 
-  gui->i_gain_sbox = pid_gain_sbox("I", 160, 200);
-  lv_spinbox_set_value(gui->i_gain_sbox, (int32_t) temp_pid.i_gain_ * 10);
+  gui->i_gain_sbox = pid_gain_sbox(tune_pid_scr->screen, "I", 160, 200);
+  lv_screen_add_object(tune_pid_scr, gui->i_gain_sbox);
 
-  gui->d_gain_sbox = pid_gain_sbox("D", 250, 200);
-  lv_spinbox_set_value(gui->d_gain_sbox, (int32_t) temp_pid.d_gain_ * 10);
+  gui->d_gain_sbox = pid_gain_sbox(tune_pid_scr->screen, "D", 250, 200);
+  lv_screen_add_object(tune_pid_scr, gui->d_gain_sbox);
+
+  lv_screen_show(tune_pid_scr, NULL);
 }
 
 static void gui_update_task(void* arg) {
   lv_gui_t* gui = (lv_gui_t*) arg;
+
+  lv_spinbox_set_value(gui->setpoint_sbox, (int32_t) setpoint * 10);
+  lv_spinbox_set_value(gui->p_gain_sbox, (int32_t) temp_pid.p_gain_ * 10);
+  lv_spinbox_set_value(gui->i_gain_sbox, (int32_t) temp_pid.i_gain_ * 10);
+  lv_spinbox_set_value(gui->d_gain_sbox, (int32_t) temp_pid.d_gain_ * 10);
 
   char tmp_buff[BUFFER_SIZE];
   event_t received_event;
@@ -364,6 +352,7 @@ void app_main()
 
   lvgl_setup();
 
+  lv_theme_set_current(lv_theme_night_init(NULL, NULL));
   gui_create(&gui);
 
   xTaskCreate(gui_update_task, "gui_update_task", 1024 * 2, (void *) &gui, 5, NULL);
