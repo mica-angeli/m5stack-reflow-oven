@@ -16,6 +16,7 @@
 #include "lv_screen.h"
 #include "../cmake-build-debug/config/sdkconfig.h"
 
+#define MAX_TEMPERATURE 250.0f
 #define BUFFER_SIZE 128
 
 // GPIO Settings
@@ -294,6 +295,27 @@ static void gui_create(lv_gui_t* gui) {
   lv_screen_show(tune_pid_scr, NULL);
 }
 
+static lv_obj_t * max_temp_message() {
+  char tmp_buff[BUFFER_SIZE];
+
+  static lv_style_t style_bg;
+  lv_style_copy(&style_bg, &lv_style_pretty);
+  style_bg.body.main_color = LV_COLOR_MAKE(0xf5, 0x45, 0x2e);
+  style_bg.body.grad_color = LV_COLOR_MAKE(0xb9, 0x1d, 0x09);
+  style_bg.body.border.color = LV_COLOR_MAKE(0x3f, 0x0a, 0x03);
+  style_bg.text.color = LV_COLOR_WHITE;
+  style_bg.body.padding.hor = 12;
+  style_bg.body.padding.ver = 8;
+  style_bg.body.shadow.width = 8;
+
+  lv_obj_t * mbox1 = lv_mbox_create(lv_scr_act(), NULL);
+  lv_obj_set_style(mbox1, &style_bg);
+  lv_obj_align(mbox1, NULL, LV_ALIGN_CENTER, 0, -40);
+  snprintf(tmp_buff, BUFFER_SIZE, "Maximum temperature limit of %.01f C reached.", MAX_TEMPERATURE);
+  lv_mbox_set_text(mbox1, tmp_buff);
+  return mbox1;
+}
+
 static void gui_update_task(void* arg) {
   lv_gui_t* gui = (lv_gui_t*) arg;
 
@@ -304,12 +326,18 @@ static void gui_update_task(void* arg) {
 
   char tmp_buff[BUFFER_SIZE];
   event_t received_event;
-
+  bool update_gui = true;
   while (1) {
     // Redraw GUI objects when there is an update from the event queue
-    if(xQueueReceive(event_queue, &received_event, portMAX_DELAY)) {
+    if(xQueueReceive(event_queue, &received_event, portMAX_DELAY) && update_gui) {
       if(TEMPERATURE_UPDATE == received_event.type) {
         const float temperature = received_event.value.float_val;
+
+        if(temperature >= MAX_TEMPERATURE) {
+          max_temp_message();
+          setpoint = 0.0f;
+          update_gui = false;
+        }
         snprintf(tmp_buff, BUFFER_SIZE, "Temp. = %.01f C", temperature);
         lv_label_set_text(gui->temp_lbl, tmp_buff);
 
