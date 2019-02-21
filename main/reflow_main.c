@@ -16,7 +16,7 @@
 #include "lv_screen.h"
 #include "../cmake-build-debug/config/sdkconfig.h"
 
-#define MAX_TEMPERATURE 250.0f
+#define MAX_TEMPERATURE 310.0f
 #define BUFFER_SIZE 128
 
 // GPIO Settings
@@ -68,6 +68,59 @@ typedef struct {
     int32_t int_val;
   } value ;
 } event_t;
+
+typedef struct {
+  float time;
+  float temp;
+} temp_point_t;
+
+typedef struct {
+  temp_point_t * points;
+  size_t points_len;
+  float start_time;
+} temp_profile_t;
+
+static bool get_temp_from_profile(const temp_profile_t * profile, float time, float *temperature) {
+//  const float time = now_time - profile->start_time;
+
+  // Check that the requested time value is within bounds
+  if(time < profile->points[0].time || time > profile->points[profile->points_len - 1].time) {
+    return false;
+  }
+
+  size_t i;
+//  for(i = 0; time < profile->points[i].time; i++){
+//    // Do nothing
+//  }
+//  i++;
+//  if(time == profile->points[i].time) {
+//    *temperature = profile->points[i].temp;
+//  }
+//  else { // Perform a linear interpolation
+//    const temp_point_t a = profile->points[i-1];
+//    const temp_point_t b = profile->points[i];
+//    *temperature = a.temp + (b.temp - a.temp) * (time - a.time) / (b.time - a.time);
+//    printf("a = %.01f,%.01f\tb = %.01f,%.01f\tTemp = %.01f\tTime = %.01f\n", a.time, a.temp, b.time, b.temp, *temperature, time);
+//  }
+  for(i = 0; i < profile->points_len; i++) {
+    if(time == profile->points[i].time) {
+      *temperature = profile->points[i].temp;
+      return true;
+    }
+    else if(time < profile->points[i].time) {
+      const temp_point_t a = profile->points[i-1];
+      const temp_point_t b = profile->points[i];
+      *temperature = a.temp + (b.temp - a.temp) * (time - a.time) / (b.time - a.time);
+      printf("a = %.01f,%.01f\tb = %.01f,%.01f\tTemp = %.01f\tTime = %.01f\n", a.time, a.temp, b.time, b.temp, *temperature, time);
+      return true;
+    }
+
+  }
+
+  return false;
+}
+
+static temp_profile_t profile1;
 
 static void IRAM_ATTR lv_tick_task(void) {
   lv_tick_inc(portTICK_RATE_MS);
@@ -319,6 +372,9 @@ static lv_obj_t * max_temp_message() {
 static void gui_update_task(void* arg) {
   lv_gui_t* gui = (lv_gui_t*) arg;
 
+  TickType_t now_time = xTaskGetTickCount();
+  TickType_t start_time = now_time;
+
   lv_spinbox_set_value(gui->setpoint_sbox, (int32_t) setpoint * 10);
   lv_spinbox_set_value(gui->p_gain_sbox, (int32_t) temp_pid.p_gain_ * 10);
   lv_spinbox_set_value(gui->i_gain_sbox, (int32_t) temp_pid.i_gain_ * 10);
@@ -330,6 +386,7 @@ static void gui_update_task(void* arg) {
   while (1) {
     // Redraw GUI objects when there is an update from the event queue
     if(xQueueReceive(event_queue, &received_event, portMAX_DELAY) && update_gui) {
+      now_time = xTaskGetTickCount();
       if(TEMPERATURE_UPDATE == received_event.type) {
         const float temperature = received_event.value.float_val;
 
@@ -338,7 +395,9 @@ static void gui_update_task(void* arg) {
           setpoint = 0.0f;
           update_gui = false;
         }
-        snprintf(tmp_buff, BUFFER_SIZE, "Temp. = %.01f C", temperature);
+        get_temp_from_profile(&profile1, ((now_time - start_time) * portTICK_RATE_MS) / 1000.0f, &setpoint);
+
+        snprintf(tmp_buff, BUFFER_SIZE, "Temp. = %.01f C", setpoint/*temperature*/);
         lv_label_set_text(gui->temp_lbl, tmp_buff);
 
         lv_chart_set_next(gui->temp_chart, gui->temp_curve, (lv_coord_t) temperature);
@@ -366,7 +425,7 @@ static void gui_update_task(void* arg) {
 void app_main()
 {
   event_queue = xQueueCreate(16, sizeof(event_t));
-  pid_set_gains(&temp_pid, 8.0f, 6.0f, 5.0f, -50.0f, 50.0f, false);
+  pid_set_gains(&temp_pid, 16.0f, 0.0f, 90.0f, -50.0f, 50.0f, false);
 
   gpio_setup();
   i2c_setup();
@@ -382,6 +441,21 @@ void app_main()
 
   lv_theme_set_current(lv_theme_night_init(NULL, NULL));
   gui_create(&gui);
+
+  profile1.points_len = 6;
+  profile1.points = malloc(sizeof(temp_point_t) * profile1.points_len);
+  profile1.points[0].time = 0.0f;
+  profile1.points[0].temp = 0.0f;
+  profile1.points[1].time = 80.0f;
+  profile1.points[1].temp = 150.0f;
+  profile1.points[2].time = 180.0f;
+  profile1.points[2].temp = 150.0f;
+  profile1.points[3].time = 230.0f;
+  profile1.points[3].temp = 245.0f;
+  profile1.points[4].time = 270.0f;
+  profile1.points[4].temp = 245.0f;
+  profile1.points[5].time = 360.0f;
+  profile1.points[5].temp = 0.0f;
 
   xTaskCreate(gui_update_task, "gui_update_task", 1024 * 2, (void *) &gui, 5, NULL);
   xTaskCreate(temperature_task, "temperature_task", 1024 * 2, NULL, 6, NULL);
