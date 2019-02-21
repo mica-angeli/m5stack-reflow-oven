@@ -14,6 +14,7 @@
 #include "mcp9600.h"
 #include "pid.h"
 #include "lv_screen.h"
+#include "temp_profile.h"
 #include "../cmake-build-debug/config/sdkconfig.h"
 
 #define MAX_TEMPERATURE 310.0f
@@ -49,7 +50,7 @@ typedef struct {
 // Global variables
 static xQueueHandle event_queue = NULL;
 static pid temp_pid;
-static float setpoint = 200.0f;
+static float setpoint = 0.0f;
 static float current_temp = 0.0f;
 static lv_group_t * g;
 static lv_gui_t gui;
@@ -69,58 +70,7 @@ typedef struct {
   } value ;
 } event_t;
 
-typedef struct {
-  float time;
-  float temp;
-} temp_point_t;
-
-typedef struct {
-  temp_point_t * points;
-  size_t points_len;
-  float start_time;
-} temp_profile_t;
-
-static bool get_temp_from_profile(const temp_profile_t * profile, float time, float *temperature) {
-//  const float time = now_time - profile->start_time;
-
-  // Check that the requested time value is within bounds
-  if(time < profile->points[0].time || time > profile->points[profile->points_len - 1].time) {
-    return false;
-  }
-
-  size_t i;
-//  for(i = 0; time < profile->points[i].time; i++){
-//    // Do nothing
-//  }
-//  i++;
-//  if(time == profile->points[i].time) {
-//    *temperature = profile->points[i].temp;
-//  }
-//  else { // Perform a linear interpolation
-//    const temp_point_t a = profile->points[i-1];
-//    const temp_point_t b = profile->points[i];
-//    *temperature = a.temp + (b.temp - a.temp) * (time - a.time) / (b.time - a.time);
-//    printf("a = %.01f,%.01f\tb = %.01f,%.01f\tTemp = %.01f\tTime = %.01f\n", a.time, a.temp, b.time, b.temp, *temperature, time);
-//  }
-  for(i = 0; i < profile->points_len; i++) {
-    if(time == profile->points[i].time) {
-      *temperature = profile->points[i].temp;
-      return true;
-    }
-    else if(time < profile->points[i].time) {
-      const temp_point_t a = profile->points[i-1];
-      const temp_point_t b = profile->points[i];
-      *temperature = a.temp + (b.temp - a.temp) * (time - a.time) / (b.time - a.time);
-      printf("a = %.01f,%.01f\tb = %.01f,%.01f\tTemp = %.01f\tTime = %.01f\n", a.time, a.temp, b.time, b.temp, *temperature, time);
-      return true;
-    }
-
-  }
-
-  return false;
-}
-
-static temp_profile_t profile1;
+static temp_profile_t * profile1;
 
 static void IRAM_ATTR lv_tick_task(void) {
   lv_tick_inc(portTICK_RATE_MS);
@@ -395,7 +345,8 @@ static void gui_update_task(void* arg) {
           setpoint = 0.0f;
           update_gui = false;
         }
-        get_temp_from_profile(&profile1, ((now_time - start_time) * portTICK_RATE_MS) / 1000.0f, &setpoint);
+
+        temp_profile_get_point(profile1, ((now_time - start_time) * portTICK_RATE_MS) / 1000.0f, &setpoint);
 
         snprintf(tmp_buff, BUFFER_SIZE, "Temp. = %.01f C", setpoint/*temperature*/);
         lv_label_set_text(gui->temp_lbl, tmp_buff);
@@ -442,20 +393,13 @@ void app_main()
   lv_theme_set_current(lv_theme_night_init(NULL, NULL));
   gui_create(&gui);
 
-  profile1.points_len = 6;
-  profile1.points = malloc(sizeof(temp_point_t) * profile1.points_len);
-  profile1.points[0].time = 0.0f;
-  profile1.points[0].temp = 0.0f;
-  profile1.points[1].time = 80.0f;
-  profile1.points[1].temp = 150.0f;
-  profile1.points[2].time = 180.0f;
-  profile1.points[2].temp = 150.0f;
-  profile1.points[3].time = 230.0f;
-  profile1.points[3].temp = 245.0f;
-  profile1.points[4].time = 270.0f;
-  profile1.points[4].temp = 245.0f;
-  profile1.points[5].time = 360.0f;
-  profile1.points[5].temp = 0.0f;
+  profile1 = temp_profile_create();
+  temp_profile_add_point(profile1, 0.0f, 0.0f);
+  temp_profile_add_point(profile1, 80.0f, 150.0f);
+  temp_profile_add_point(profile1, 180.0f, 150.0f);
+  temp_profile_add_point(profile1, 230.0f, 245.0f);
+  temp_profile_add_point(profile1, 270.0f, 245.0f);
+  temp_profile_add_point(profile1, 360.0f, 0.0f);
 
   xTaskCreate(gui_update_task, "gui_update_task", 1024 * 2, (void *) &gui, 5, NULL);
   xTaskCreate(temperature_task, "temperature_task", 1024 * 2, NULL, 6, NULL);
