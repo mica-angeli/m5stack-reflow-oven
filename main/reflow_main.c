@@ -70,7 +70,7 @@ typedef struct {
   } value ;
 } event_t;
 
-static temp_profile_t * profile1;
+static temp_profile_t * mg_4860p;
 
 static void IRAM_ATTR lv_tick_task(void) {
   lv_tick_inc(portTICK_RATE_MS);
@@ -346,7 +346,7 @@ static void gui_update_task(void* arg) {
           update_gui = false;
         }
 
-        temp_profile_get_point(profile1, ((now_time - start_time) * portTICK_RATE_MS) / 1000.0f, &setpoint);
+        temp_profile_get_point(mg_4860p, ((now_time - start_time) * portTICK_RATE_MS) / 1000.0f, &setpoint);
 
         snprintf(tmp_buff, BUFFER_SIZE, "Temp. = %.01f C", setpoint/*temperature*/);
         lv_label_set_text(gui->temp_lbl, tmp_buff);
@@ -393,13 +393,15 @@ void app_main()
   lv_theme_set_current(lv_theme_night_init(NULL, NULL));
   gui_create(&gui);
 
-  profile1 = temp_profile_create();
-  temp_profile_add_point(profile1, 0.0f, 0.0f);
-  temp_profile_add_point(profile1, 80.0f, 150.0f);
-  temp_profile_add_point(profile1, 180.0f, 150.0f);
-  temp_profile_add_point(profile1, 230.0f, 245.0f);
-  temp_profile_add_point(profile1, 270.0f, 245.0f);
-  temp_profile_add_point(profile1, 360.0f, 0.0f);
+  mg_4860p = temp_profile_create();
+  temp_profile_add_point(mg_4860p, 0.0f, 25.0f);
+  temp_profile_add_point(mg_4860p, 90.0f, 125.0f);
+  temp_profile_add_point(mg_4860p, 150.0f, 140.0f);
+  temp_profile_add_point(mg_4860p, 210.0f, 150.0f);
+  temp_profile_add_point(mg_4860p, 240.0f, 160.0f);
+  temp_profile_add_point(mg_4860p, 300.0f, 225.0f);
+  temp_profile_add_point(mg_4860p, 330.0f, 183.0f);
+  temp_profile_add_point(mg_4860p, 360.0f, 140.0f);
 
   xTaskCreate(gui_update_task, "gui_update_task", 1024 * 2, (void *) &gui, 5, NULL);
   xTaskCreate(temperature_task, "temperature_task", 1024 * 2, NULL, 6, NULL);
