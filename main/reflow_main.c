@@ -348,7 +348,7 @@ static void gui_update_task(void* arg) {
 
         temp_profile_get_point(mg_4860p, ((now_time - start_time) * portTICK_RATE_MS) / 1000.0f, &setpoint);
 
-        snprintf(tmp_buff, BUFFER_SIZE, "Temp. = %.01f C", setpoint/*temperature*/);
+        snprintf(tmp_buff, BUFFER_SIZE, "Temp. = %.01f C", temperature);
         lv_label_set_text(gui->temp_lbl, tmp_buff);
 
         lv_chart_set_next(gui->temp_chart, gui->temp_curve, (lv_coord_t) temperature);
@@ -399,7 +399,7 @@ void app_main()
   temp_profile_add_point(mg_4860p, 150.0f, 140.0f);
   temp_profile_add_point(mg_4860p, 210.0f, 150.0f);
   temp_profile_add_point(mg_4860p, 240.0f, 160.0f);
-  temp_profile_add_point(mg_4860p, 300.0f, 225.0f);
+  temp_profile_add_point(mg_4860p, 300.0f, 215.0f);
   temp_profile_add_point(mg_4860p, 330.0f, 183.0f);
   temp_profile_add_point(mg_4860p, 360.0f, 140.0f);
 
