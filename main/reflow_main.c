@@ -35,6 +35,7 @@
 #define I2C_MASTER_RX_BUF_DISABLE 0
 
 typedef struct {
+  lv_screen_t * tune_pid_scr;
   lv_obj_t *setpoint_sbox;
   lv_obj_t *p_gain_sbox;
   lv_obj_t *i_gain_sbox;
@@ -43,8 +44,15 @@ typedef struct {
   lv_obj_t *power_lbl;
   lv_obj_t *heat_led;
   lv_obj_t *temp_chart;
+  lv_obj_t *home1_btn;
   lv_chart_series_t * temp_curve;
   lv_chart_series_t * setpoint_curve;
+  lv_screen_t * main_menu_scr;
+  lv_obj_t * menu_lst;
+  lv_obj_t * run_profile_btn;
+  lv_obj_t * tune_pid_btn;
+  lv_obj_t * settings_btn;
+
 } lv_gui_t;
 
 // Global variables
@@ -54,7 +62,6 @@ static float setpoint = 0.0f;
 static float current_temp = 0.0f;
 static lv_group_t * g;
 static lv_gui_t gui;
-static lv_screen_t * tune_pid_scr;
 
 typedef enum {
   TEMPERATURE_UPDATE,
@@ -217,6 +224,17 @@ static void spinbox_cb(lv_obj_t *spinbox, int32_t new_value) {
   }
 }
 
+static lv_res_t main_menu_cb(lv_obj_t * clicked_btn) {
+  if(gui.tune_pid_btn == clicked_btn) {
+    lv_screen_show(gui.tune_pid_scr, gui.main_menu_scr);
+  }
+  else if(gui.home1_btn == clicked_btn) {
+    lv_screen_show(gui.main_menu_scr, gui.tune_pid_scr);
+    lv_group_set_editing(g, true);
+  }
+  return LV_RES_OK;
+}
+
 static lv_obj_t * pid_gain_sbox(lv_obj_t * par, const char *label, lv_coord_t x, lv_coord_t y) {
   lv_obj_t *sbox = lv_spinbox_create(par, NULL);
   lv_spinbox_set_digit_format(sbox, 3, 2);
@@ -257,45 +275,81 @@ static lv_obj_t * temperature_chart(lv_obj_t * par) {
   return chart;
 }
 
-static void gui_create(lv_gui_t* gui) {
-  tune_pid_scr = lv_screen_create(g);
+static lv_obj_t * menu_list(lv_obj_t * par) {
+  /* Create the list */
+  lv_obj_t * list1 = lv_list_create(par, NULL);
+  lv_obj_set_size(list1, 250, 170);
+  lv_obj_align(list1, NULL, LV_ALIGN_CENTER, 0, 0);
 
-  gui->temp_lbl = lv_label_create(tune_pid_scr->screen, NULL);
+  /*Create a label above the list*/
+  lv_obj_t * label;
+  label = lv_label_create(par, NULL);
+  lv_label_set_text(label, "M5Stack Reflow Oven");
+  lv_obj_align(label, list1, LV_ALIGN_OUT_TOP_MID, 0, -10);
+  return list1;
+}
+
+static void gui_create(lv_gui_t* gui) {
+  // Build the main menu screen
+  gui->main_menu_scr = lv_screen_create(g);
+
+  gui->menu_lst = menu_list(gui->main_menu_scr->screen);
+  lv_screen_add_object(gui->main_menu_scr, gui->menu_lst);
+
+  /*Add list elements*/
+  gui->run_profile_btn = lv_list_add(gui->menu_lst, SYMBOL_CHARGE, "Run Profile...", main_menu_cb);
+  gui->tune_pid_btn = lv_list_add(gui->menu_lst, SYMBOL_LIST, "Tune PID...", main_menu_cb);
+  gui->settings_btn = lv_list_add(gui->menu_lst, SYMBOL_SETTINGS, "Settings", main_menu_cb);
+
+  // Build the PID Tuning screen
+  gui->tune_pid_scr = lv_screen_create(g);
+
+  gui->temp_lbl = lv_label_create(gui->tune_pid_scr->screen, NULL);
   lv_obj_set_pos(gui->temp_lbl, 20, 10);
   lv_label_set_text(gui->temp_lbl, "Temp. = N/A");
 
-  gui->setpoint_sbox = lv_spinbox_create(tune_pid_scr->screen, NULL);
+  gui->setpoint_sbox = lv_spinbox_create(gui->tune_pid_scr->screen, NULL);
   lv_spinbox_set_digit_format(gui->setpoint_sbox, 4, 3);
   lv_spinbox_set_range(gui->setpoint_sbox, 0, 3000);
   lv_obj_set_size(gui->setpoint_sbox, 70, 30);
   lv_obj_align(gui->setpoint_sbox, NULL, LV_ALIGN_IN_TOP_LEFT, 4, 0);
   lv_obj_set_pos(gui->setpoint_sbox, 90, 40);
   lv_spinbox_set_value_changed_cb(gui->setpoint_sbox, spinbox_cb);
-  lv_screen_add_object(tune_pid_scr, gui->setpoint_sbox);
+  lv_screen_add_object(gui->tune_pid_scr, gui->setpoint_sbox);
 
-  lv_obj_t * setpoint_label = lv_label_create(tune_pid_scr->screen, NULL);
+  lv_obj_t * setpoint_label = lv_label_create(gui->tune_pid_scr->screen, NULL);
   lv_label_set_text(setpoint_label, "Set T.");
   lv_obj_align(setpoint_label, gui->setpoint_sbox, LV_ALIGN_OUT_LEFT_MID, -10, 0);
 
-  gui->heat_led = indicator_led(tune_pid_scr->screen, "Heat");
+  gui->heat_led = indicator_led(gui->tune_pid_scr->screen, "Heat");
 
-  gui->power_lbl = lv_label_create(tune_pid_scr->screen, NULL);
+  gui->power_lbl = lv_label_create(gui->tune_pid_scr->screen, NULL);
   lv_obj_set_pos(gui->power_lbl, 230, 40);
 
-  gui->temp_chart = temperature_chart(tune_pid_scr->screen);
+  gui->temp_chart = temperature_chart(gui->tune_pid_scr->screen);
   gui->temp_curve = lv_chart_add_series(gui->temp_chart, LV_COLOR_RED);
   gui->setpoint_curve = lv_chart_add_series(gui->temp_chart, LV_COLOR_GREEN);
 
-  gui->p_gain_sbox = pid_gain_sbox(tune_pid_scr->screen, "P", 70, 200);
-  lv_screen_add_object(tune_pid_scr, gui->p_gain_sbox);
+  gui->p_gain_sbox = pid_gain_sbox(gui->tune_pid_scr->screen, "P", 30, 200);
+  lv_screen_add_object(gui->tune_pid_scr, gui->p_gain_sbox);
 
-  gui->i_gain_sbox = pid_gain_sbox(tune_pid_scr->screen, "I", 160, 200);
-  lv_screen_add_object(tune_pid_scr, gui->i_gain_sbox);
+  gui->i_gain_sbox = pid_gain_sbox(gui->tune_pid_scr->screen, "I", 120, 200);
+  lv_screen_add_object(gui->tune_pid_scr, gui->i_gain_sbox);
 
-  gui->d_gain_sbox = pid_gain_sbox(tune_pid_scr->screen, "D", 250, 200);
-  lv_screen_add_object(tune_pid_scr, gui->d_gain_sbox);
+  gui->d_gain_sbox = pid_gain_sbox(gui->tune_pid_scr->screen, "D", 210, 200);
+  lv_screen_add_object(gui->tune_pid_scr, gui->d_gain_sbox);
 
-  lv_screen_show(tune_pid_scr, NULL);
+  gui->home1_btn = lv_btn_create(gui->tune_pid_scr->screen, NULL);
+  lv_cont_set_fit(gui->home1_btn, true, true);
+  lv_obj_set_pos(gui->home1_btn, 270, 200);
+  lv_obj_t *home1_lbl = lv_label_create(gui->home1_btn, NULL);
+  lv_label_set_text(home1_lbl, SYMBOL_HOME);
+  lv_btn_set_action(gui->home1_btn, LV_BTN_ACTION_CLICK, main_menu_cb);
+  lv_screen_add_object(gui->tune_pid_scr, gui->home1_btn);
+
+  // Show the initial screen
+  lv_screen_show(gui->main_menu_scr, NULL);
+  lv_group_set_editing(g, true);
 }
 
 static lv_obj_t * max_temp_message() {
