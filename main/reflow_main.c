@@ -52,6 +52,10 @@ typedef struct {
   lv_obj_t * run_profile_btn;
   lv_obj_t * tune_pid_btn;
   lv_obj_t * settings_btn;
+  lv_screen_t * select_profile_scr;
+  lv_obj_t * profile_lst;
+  lv_obj_t * back_prof_btn;
+  lv_obj_t * mg_4860p_prof_btn;
 
 } lv_gui_t;
 
@@ -77,6 +81,7 @@ typedef struct {
   } value ;
 } event_t;
 
+static temp_profile_t * current_profile;
 static temp_profile_t * mg_4860p;
 
 static void IRAM_ATTR lv_tick_task(void) {
@@ -224,13 +229,22 @@ static void spinbox_cb(lv_obj_t *spinbox, int32_t new_value) {
   }
 }
 
-static lv_res_t main_menu_cb(lv_obj_t * clicked_btn) {
-  if(gui.tune_pid_btn == clicked_btn) {
+static lv_res_t button_clicked_cb(lv_obj_t *clicked_btn) {
+  if(gui.run_profile_btn == clicked_btn) {
+    lv_screen_show(gui.select_profile_scr, gui.main_menu_scr);
+  }
+  else if(gui.tune_pid_btn == clicked_btn) {
     lv_screen_show(gui.tune_pid_scr, gui.main_menu_scr);
   }
   else if(gui.home1_btn == clicked_btn) {
     lv_screen_show(gui.main_menu_scr, gui.tune_pid_scr);
-    lv_group_set_editing(g, true);
+  }
+  else if(gui.back_prof_btn == clicked_btn) {
+    lv_screen_show(gui.main_menu_scr, gui.select_profile_scr);
+  }
+  else if(gui.mg_4860p_prof_btn == clicked_btn) {
+    current_profile = mg_4860p;
+//    lv_screen_show()
   }
   return LV_RES_OK;
 }
@@ -275,31 +289,45 @@ static lv_obj_t * temperature_chart(lv_obj_t * par) {
   return chart;
 }
 
-static lv_obj_t * menu_list(lv_obj_t * par) {
-  /* Create the list */
-  lv_obj_t * list1 = lv_list_create(par, NULL);
-  lv_obj_set_size(list1, 250, 170);
-  lv_obj_align(list1, NULL, LV_ALIGN_CENTER, 0, 0);
-
-  /*Create a label above the list*/
-  lv_obj_t * label;
-  label = lv_label_create(par, NULL);
-  lv_label_set_text(label, "M5Stack Reflow Oven");
-  lv_obj_align(label, list1, LV_ALIGN_OUT_TOP_MID, 0, -10);
-  return list1;
-}
-
 static void main_menu_gui_create(lv_gui_t *gui) {
   // Build the main menu screen
   gui->main_menu_scr = lv_screen_create(g);
 
-  gui->menu_lst = menu_list(gui->main_menu_scr->screen);
+  gui->menu_lst = lv_list_create(gui->main_menu_scr->screen, NULL);
+  lv_obj_set_size(gui->menu_lst, 250, 170);
+  lv_obj_align(gui->menu_lst, NULL, LV_ALIGN_CENTER, 0, 0);
+
+  lv_obj_t * label;
+  label = lv_label_create(gui->main_menu_scr->screen, NULL);
+  lv_label_set_text(label, "M5Stack Reflow Oven");
+  lv_obj_align(label, gui->menu_lst, LV_ALIGN_OUT_TOP_MID, 0, -10);
+
   lv_screen_add_object(gui->main_menu_scr, gui->menu_lst);
 
   /*Add list elements*/
-  gui->run_profile_btn = lv_list_add(gui->menu_lst, SYMBOL_CHARGE, "Run Profile...", main_menu_cb);
-  gui->tune_pid_btn = lv_list_add(gui->menu_lst, SYMBOL_LIST, "Tune PID...", main_menu_cb);
-  gui->settings_btn = lv_list_add(gui->menu_lst, SYMBOL_SETTINGS, "Settings", main_menu_cb);
+  gui->run_profile_btn = lv_list_add(gui->menu_lst, SYMBOL_CHARGE, "Run Profile...", button_clicked_cb);
+  gui->tune_pid_btn = lv_list_add(gui->menu_lst, SYMBOL_LIST, "Tune PID...", button_clicked_cb);
+  gui->settings_btn = lv_list_add(gui->menu_lst, SYMBOL_SETTINGS, "Settings", button_clicked_cb);
+}
+
+static void select_profile_gui_create(lv_gui_t *gui) {
+  // Build the main menu screen
+  gui->select_profile_scr = lv_screen_create(g);
+
+  gui->profile_lst = lv_list_create(gui->select_profile_scr->screen, NULL);
+  lv_obj_set_size(gui->profile_lst, 250, 170);
+  lv_obj_align(gui->profile_lst, NULL, LV_ALIGN_CENTER, 0, 0);
+
+  lv_obj_t * label;
+  label = lv_label_create(gui->select_profile_scr->screen, NULL);
+  lv_label_set_text(label, "Select Temp. Profile");
+  lv_obj_align(label, gui->profile_lst, LV_ALIGN_OUT_TOP_MID, 0, -10);
+
+  lv_screen_add_object(gui->select_profile_scr, gui->profile_lst);
+
+  /*Add list elements*/
+  gui->back_prof_btn = lv_list_add(gui->profile_lst, SYMBOL_LEFT, "Back...", button_clicked_cb);
+  gui->mg_4860p_prof_btn = lv_list_add(gui->profile_lst, SYMBOL_CHARGE, "MG Chem. 4860P (Pb)", button_clicked_cb);
 }
 
 static void tune_pid_gui_create(lv_gui_t *gui) {
@@ -346,7 +374,7 @@ static void tune_pid_gui_create(lv_gui_t *gui) {
   lv_obj_set_pos(gui->home1_btn, 270, 200);
   lv_obj_t *home1_lbl = lv_label_create(gui->home1_btn, NULL);
   lv_label_set_text(home1_lbl, SYMBOL_HOME);
-  lv_btn_set_action(gui->home1_btn, LV_BTN_ACTION_CLICK, main_menu_cb);
+  lv_btn_set_action(gui->home1_btn, LV_BTN_ACTION_CLICK, button_clicked_cb);
   lv_screen_add_object(gui->tune_pid_scr, gui->home1_btn);
 }
 
@@ -445,11 +473,11 @@ void app_main()
   lv_theme_set_current(lv_theme_night_init(NULL, NULL));
 
   main_menu_gui_create(&gui);
+  select_profile_gui_create(&gui);
   tune_pid_gui_create(&gui);
 
   // Show the initial screen
   lv_screen_show(gui.main_menu_scr, NULL);
-  lv_group_set_editing(g, true);
 
   mg_4860p = temp_profile_create();
   temp_profile_add_point(mg_4860p, 0.0f, 25.0f);

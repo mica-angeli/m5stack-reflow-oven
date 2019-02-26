@@ -66,6 +66,9 @@ void lv_screen_show(lv_screen_t * scr, lv_screen_t * prev_scr) {
   }
 
   lv_group_focus_obj(scr->objects[0]);
+  if(scr->objects_len == 1) {
+    lv_group_set_editing(scr->group, true);
+  }
 
   lv_scr_load(scr->screen);
 }
