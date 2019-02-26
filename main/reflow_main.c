@@ -289,7 +289,7 @@ static lv_obj_t * menu_list(lv_obj_t * par) {
   return list1;
 }
 
-static void gui_create(lv_gui_t* gui) {
+static void main_menu_gui_create(lv_gui_t *gui) {
   // Build the main menu screen
   gui->main_menu_scr = lv_screen_create(g);
 
@@ -300,7 +300,9 @@ static void gui_create(lv_gui_t* gui) {
   gui->run_profile_btn = lv_list_add(gui->menu_lst, SYMBOL_CHARGE, "Run Profile...", main_menu_cb);
   gui->tune_pid_btn = lv_list_add(gui->menu_lst, SYMBOL_LIST, "Tune PID...", main_menu_cb);
   gui->settings_btn = lv_list_add(gui->menu_lst, SYMBOL_SETTINGS, "Settings", main_menu_cb);
+}
 
+static void tune_pid_gui_create(lv_gui_t *gui) {
   // Build the PID Tuning screen
   gui->tune_pid_scr = lv_screen_create(g);
 
@@ -346,10 +348,6 @@ static void gui_create(lv_gui_t* gui) {
   lv_label_set_text(home1_lbl, SYMBOL_HOME);
   lv_btn_set_action(gui->home1_btn, LV_BTN_ACTION_CLICK, main_menu_cb);
   lv_screen_add_object(gui->tune_pid_scr, gui->home1_btn);
-
-  // Show the initial screen
-  lv_screen_show(gui->main_menu_scr, NULL);
-  lv_group_set_editing(g, true);
 }
 
 static lv_obj_t * max_temp_message() {
@@ -445,7 +443,13 @@ void app_main()
   lvgl_setup();
 
   lv_theme_set_current(lv_theme_night_init(NULL, NULL));
-  gui_create(&gui);
+
+  main_menu_gui_create(&gui);
+  tune_pid_gui_create(&gui);
+
+  // Show the initial screen
+  lv_screen_show(gui.main_menu_scr, NULL);
+  lv_group_set_editing(g, true);
 
   mg_4860p = temp_profile_create();
   temp_profile_add_point(mg_4860p, 0.0f, 25.0f);
