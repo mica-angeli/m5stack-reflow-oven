@@ -59,6 +59,7 @@ typedef struct {
   lv_obj_t * mg_4860p_prof_btn;
   lv_screen_t * run_profile_scr;
   lv_obj_t *temp1_lbl;
+  lv_obj_t *time_lbl;
   lv_obj_t *heat1_led;
   lv_obj_t *temp1_chart;
   lv_obj_t *home1_btn;
@@ -235,6 +236,12 @@ static void control_task(void *arg) {
   }
 }
 
+static int time_format(char * str, float seconds) {
+  int mins = ((int) seconds) / 60;
+  int secs = ((int) seconds) % 60;
+  return sprintf(str, "%02d:%02d", mins, secs);
+}
+
 static void spinbox_cb(lv_obj_t *spinbox, int32_t new_value) {
   if(gui.p_gain_sbox == spinbox) {
     temp_pid.p_gain_ = (float) new_value / 10;
@@ -394,6 +401,10 @@ static void run_profile_gui_create(lv_gui_t *gui) {
   lv_obj_set_pos(gui->temp1_lbl, 20, 10);
   lv_label_set_text(gui->temp1_lbl, "---.- C");
 
+  gui->time_lbl = lv_label_create(gui->run_profile_scr->screen, NULL);
+  lv_obj_set_pos(gui->time_lbl, 110, 10);
+  lv_label_set_text(gui->time_lbl, "01:36/03:33");
+
   gui->heat1_led = indicator_led(gui->run_profile_scr->screen, "Heat");
 
   gui->temp1_chart = lv_chart_create(gui->run_profile_scr->screen, NULL);
@@ -516,15 +527,20 @@ static void gui_update_task(void* arg) {
   char tmp_buff[BUFFER_SIZE];
   event_t received_event;
   bool update_gui = true;
+  float elapsed_time = 0.0f;
+  float total_time = 0.0f;
   while (1) {
     // Redraw GUI objects when there is an update from the event queue
     if(xQueueReceive(event_queue, &received_event, portMAX_DELAY) && update_gui) {
       now_time = xTaskGetTickCount();
       if(STATE_OVEN_RUNNING == state) {
-        temp_profile_get_point(mg_4860p, ((now_time - start_time) * portTICK_RATE_MS) / 1000.0f, &setpoint);
+        elapsed_time = ((now_time - start_time) * portTICK_RATE_MS) / 1000.0f;
+
+        temp_profile_get_point(mg_4860p, elapsed_time, &setpoint);
       }
       else if(STATE_MENU == state || STATE_OVEN_STANDBY == state) {
-        setpoint =0.0f;
+        setpoint = 0.0f;
+        elapsed_time = 0.0f;
       }
 
       if(TEMPERATURE_UPDATE == received_event.type) {
@@ -547,6 +563,14 @@ static void gui_update_task(void* arg) {
         if(STATE_OVEN_STANDBY == state || STATE_OVEN_PAUSED == state || STATE_OVEN_RUNNING == state) {
           snprintf(tmp_buff, BUFFER_SIZE, "%.01f C", temperature);
           lv_label_set_text(gui->temp1_lbl, tmp_buff);
+
+          total_time = mg_4860p->points[mg_4860p->points_len -1].time;
+
+          char et_buff[8], tt_buff[8];
+          time_format(et_buff, elapsed_time);
+          time_format(tt_buff, total_time);
+          snprintf(tmp_buff, BUFFER_SIZE, "%s/%s", et_buff, tt_buff);
+          lv_label_set_text(gui->time_lbl, tmp_buff);
 
           lv_chart_set_next(gui->temp1_chart, gui->temp1_curve, (lv_coord_t) temperature);
           lv_chart_set_next(gui->temp1_chart, gui->setpoint1_curve, (lv_coord_t) setpoint);
