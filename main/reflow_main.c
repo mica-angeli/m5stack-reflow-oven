@@ -35,18 +35,19 @@
 #define I2C_MASTER_RX_BUF_DISABLE 0
 
 typedef struct {
+  lv_screen_t * current_scr;
   lv_screen_t * tune_pid_scr;
   lv_obj_t *setpoint_sbox;
   lv_obj_t *p_gain_sbox;
   lv_obj_t *i_gain_sbox;
   lv_obj_t *d_gain_sbox;
-  lv_obj_t *temp_lbl;
+  lv_obj_t *temp2_lbl;
   lv_obj_t *power_lbl;
-  lv_obj_t *heat_led;
-  lv_obj_t *temp_chart;
-  lv_obj_t *home1_btn;
-  lv_chart_series_t * temp_curve;
-  lv_chart_series_t * setpoint_curve;
+  lv_obj_t *heat2_led;
+  lv_obj_t *temp2_chart;
+  lv_obj_t *home2_btn;
+  lv_chart_series_t * temp2_curve;
+  lv_chart_series_t * setpoint2_curve;
   lv_screen_t * main_menu_scr;
   lv_obj_t * menu_lst;
   lv_obj_t * run_profile_btn;
@@ -56,8 +57,25 @@ typedef struct {
   lv_obj_t * profile_lst;
   lv_obj_t * back_prof_btn;
   lv_obj_t * mg_4860p_prof_btn;
-
+  lv_screen_t * run_profile_scr;
+  lv_obj_t *temp1_lbl;
+  lv_obj_t *heat1_led;
+  lv_obj_t *temp1_chart;
+  lv_obj_t *home1_btn;
+  lv_chart_series_t * temp1_curve;
+  lv_chart_series_t * setpoint1_curve;
+  lv_obj_t *play_btn;
+  lv_obj_t *play_lbl;
+  lv_obj_t *stop_btn;
 } lv_gui_t;
+
+typedef enum {
+  STATE_MENU,
+  STATE_PID_TUNING,
+  STATE_OVEN_STANDBY,
+  STATE_OVEN_RUNNING,
+  STATE_OVEN_PAUSED,
+} state_t;
 
 // Global variables
 static xQueueHandle event_queue = NULL;
@@ -66,6 +84,9 @@ static float setpoint = 0.0f;
 static float current_temp = 0.0f;
 static lv_group_t * g;
 static lv_gui_t gui;
+static state_t state = STATE_OVEN_STANDBY;
+static TickType_t start_time;
+static TickType_t pause_time;
 
 typedef enum {
   TEMPERATURE_UPDATE,
@@ -229,22 +250,57 @@ static void spinbox_cb(lv_obj_t *spinbox, int32_t new_value) {
   }
 }
 
-static lv_res_t button_clicked_cb(lv_obj_t *clicked_btn) {
+static lv_res_t menu_btn_cb(lv_obj_t *clicked_btn) {
   if(gui.run_profile_btn == clicked_btn) {
+    state = STATE_MENU;
     lv_screen_show(gui.select_profile_scr, gui.main_menu_scr);
   }
   else if(gui.tune_pid_btn == clicked_btn) {
+    state = STATE_PID_TUNING;
     lv_screen_show(gui.tune_pid_scr, gui.main_menu_scr);
   }
-  else if(gui.home1_btn == clicked_btn) {
+  else if(gui.home2_btn == clicked_btn) {
+    state = STATE_MENU;
     lv_screen_show(gui.main_menu_scr, gui.tune_pid_scr);
   }
   else if(gui.back_prof_btn == clicked_btn) {
+    state = STATE_MENU;
     lv_screen_show(gui.main_menu_scr, gui.select_profile_scr);
   }
   else if(gui.mg_4860p_prof_btn == clicked_btn) {
     current_profile = mg_4860p;
-//    lv_screen_show()
+    state = STATE_OVEN_STANDBY;
+    lv_screen_show(gui.run_profile_scr, gui.select_profile_scr);
+  }
+  else if(gui.home1_btn == clicked_btn) {
+    state = STATE_MENU;
+    lv_screen_show(gui.main_menu_scr, gui.run_profile_scr);
+  }
+  return LV_RES_OK;
+}
+
+static lv_res_t state_btn_cb(lv_obj_t *clicked_btn) {
+  if(gui.play_btn == clicked_btn) {
+    if(STATE_OVEN_RUNNING == state) {
+      state = STATE_OVEN_PAUSED;
+      pause_time = xTaskGetTickCount();
+      lv_label_set_text(gui.play_lbl, SYMBOL_PLAY);
+    }
+    else if(STATE_OVEN_STANDBY == state) {
+      state = STATE_OVEN_RUNNING;
+      start_time = xTaskGetTickCount();
+      lv_label_set_text(gui.play_lbl, SYMBOL_PAUSE);
+    }
+    else if(STATE_OVEN_PAUSED == state) {
+      TickType_t resume_time = xTaskGetTickCount();
+      start_time = (resume_time - pause_time) + start_time;
+      state = STATE_OVEN_RUNNING;
+      lv_label_set_text(gui.play_lbl, SYMBOL_PAUSE);
+    }
+  }
+  else if(gui.stop_btn) {
+    state = STATE_OVEN_STANDBY;
+    lv_label_set_text(gui.play_lbl, SYMBOL_PLAY);
   }
   return LV_RES_OK;
 }
@@ -305,13 +361,13 @@ static void main_menu_gui_create(lv_gui_t *gui) {
   lv_screen_add_object(gui->main_menu_scr, gui->menu_lst);
 
   /*Add list elements*/
-  gui->run_profile_btn = lv_list_add(gui->menu_lst, SYMBOL_CHARGE, "Run Profile...", button_clicked_cb);
-  gui->tune_pid_btn = lv_list_add(gui->menu_lst, SYMBOL_LIST, "Tune PID...", button_clicked_cb);
-  gui->settings_btn = lv_list_add(gui->menu_lst, SYMBOL_SETTINGS, "Settings", button_clicked_cb);
+  gui->run_profile_btn = lv_list_add(gui->menu_lst, SYMBOL_CHARGE, "Run Profile...", menu_btn_cb);
+  gui->tune_pid_btn = lv_list_add(gui->menu_lst, SYMBOL_LIST, "Tune PID...", menu_btn_cb);
+  gui->settings_btn = lv_list_add(gui->menu_lst, SYMBOL_SETTINGS, "Settings", menu_btn_cb);
 }
 
 static void select_profile_gui_create(lv_gui_t *gui) {
-  // Build the main menu screen
+  // Build the select profile screen
   gui->select_profile_scr = lv_screen_create(g);
 
   gui->profile_lst = lv_list_create(gui->select_profile_scr->screen, NULL);
@@ -326,17 +382,64 @@ static void select_profile_gui_create(lv_gui_t *gui) {
   lv_screen_add_object(gui->select_profile_scr, gui->profile_lst);
 
   /*Add list elements*/
-  gui->back_prof_btn = lv_list_add(gui->profile_lst, SYMBOL_LEFT, "Back...", button_clicked_cb);
-  gui->mg_4860p_prof_btn = lv_list_add(gui->profile_lst, SYMBOL_CHARGE, "MG Chem. 4860P (Pb)", button_clicked_cb);
+  gui->back_prof_btn = lv_list_add(gui->profile_lst, SYMBOL_LEFT, "Back...", menu_btn_cb);
+  gui->mg_4860p_prof_btn = lv_list_add(gui->profile_lst, SYMBOL_CHARGE, "MG Chem. 4860P (Pb)", menu_btn_cb);
+}
+
+static void run_profile_gui_create(lv_gui_t *gui) {
+  // Build the Run Profile screen
+  gui->run_profile_scr = lv_screen_create(g);
+
+  gui->temp1_lbl = lv_label_create(gui->run_profile_scr->screen, NULL);
+  lv_obj_set_pos(gui->temp1_lbl, 20, 10);
+  lv_label_set_text(gui->temp1_lbl, "---.- C");
+
+  gui->heat1_led = indicator_led(gui->run_profile_scr->screen, "Heat");
+
+  gui->temp1_chart = lv_chart_create(gui->run_profile_scr->screen, NULL);
+  lv_obj_set_size(gui->temp1_chart, 300, 160);
+  lv_obj_align(gui->temp1_chart, NULL, LV_ALIGN_CENTER, 0, -5);
+  lv_chart_set_type(gui->temp1_chart, LV_CHART_TYPE_LINE);
+  lv_chart_set_series_opa(gui->temp1_chart, LV_OPA_70);                            /*Opacity of the data series*/
+  lv_chart_set_series_width(gui->temp1_chart, 2);                                  /*Line width and point radious*/
+  lv_chart_set_range(gui->temp1_chart, 0, 300);
+  lv_chart_set_point_count(gui->temp1_chart, 600);
+
+  gui->temp1_curve = lv_chart_add_series(gui->temp1_chart, LV_COLOR_RED);
+  gui->setpoint1_curve = lv_chart_add_series(gui->temp1_chart, LV_COLOR_CYAN);
+
+  gui->play_btn = lv_btn_create(gui->run_profile_scr->screen, NULL);
+  lv_obj_set_size(gui->play_btn, 80, 35);
+  lv_obj_set_pos(gui->play_btn, 10, 200);
+  gui->play_lbl = lv_label_create(gui->play_btn, NULL);
+  lv_label_set_text(gui->play_lbl, SYMBOL_PLAY);
+  lv_btn_set_action(gui->play_btn, LV_BTN_ACTION_CLICK, state_btn_cb);
+  lv_screen_add_object(gui->run_profile_scr, gui->play_btn);
+
+  gui->stop_btn = lv_btn_create(gui->run_profile_scr->screen, NULL);
+  lv_obj_set_size(gui->stop_btn, 80, 35);
+  lv_obj_set_pos(gui->stop_btn, 120, 200);
+  lv_obj_t *stop_lbl = lv_label_create(gui->stop_btn, NULL);
+  lv_label_set_text(stop_lbl, SYMBOL_STOP);
+  lv_btn_set_action(gui->stop_btn, LV_BTN_ACTION_CLICK, state_btn_cb);
+  lv_screen_add_object(gui->run_profile_scr, gui->stop_btn);
+
+  gui->home1_btn = lv_btn_create(gui->run_profile_scr->screen, NULL);
+  lv_obj_set_size(gui->home1_btn, 80, 35);
+  lv_obj_set_pos(gui->home1_btn, 230, 200);
+  lv_obj_t *home1_lbl = lv_label_create(gui->home1_btn, NULL);
+  lv_label_set_text(home1_lbl, SYMBOL_HOME);
+  lv_btn_set_action(gui->home1_btn, LV_BTN_ACTION_CLICK, menu_btn_cb);
+  lv_screen_add_object(gui->run_profile_scr, gui->home1_btn);
 }
 
 static void tune_pid_gui_create(lv_gui_t *gui) {
   // Build the PID Tuning screen
   gui->tune_pid_scr = lv_screen_create(g);
 
-  gui->temp_lbl = lv_label_create(gui->tune_pid_scr->screen, NULL);
-  lv_obj_set_pos(gui->temp_lbl, 20, 10);
-  lv_label_set_text(gui->temp_lbl, "Temp. = N/A");
+  gui->temp2_lbl = lv_label_create(gui->tune_pid_scr->screen, NULL);
+  lv_obj_set_pos(gui->temp2_lbl, 20, 10);
+  lv_label_set_text(gui->temp2_lbl, "Temp. = N/A");
 
   gui->setpoint_sbox = lv_spinbox_create(gui->tune_pid_scr->screen, NULL);
   lv_spinbox_set_digit_format(gui->setpoint_sbox, 4, 3);
@@ -351,14 +454,14 @@ static void tune_pid_gui_create(lv_gui_t *gui) {
   lv_label_set_text(setpoint_label, "Set T.");
   lv_obj_align(setpoint_label, gui->setpoint_sbox, LV_ALIGN_OUT_LEFT_MID, -10, 0);
 
-  gui->heat_led = indicator_led(gui->tune_pid_scr->screen, "Heat");
+  gui->heat2_led = indicator_led(gui->tune_pid_scr->screen, "Heat");
 
   gui->power_lbl = lv_label_create(gui->tune_pid_scr->screen, NULL);
   lv_obj_set_pos(gui->power_lbl, 230, 40);
 
-  gui->temp_chart = temperature_chart(gui->tune_pid_scr->screen);
-  gui->temp_curve = lv_chart_add_series(gui->temp_chart, LV_COLOR_RED);
-  gui->setpoint_curve = lv_chart_add_series(gui->temp_chart, LV_COLOR_GREEN);
+  gui->temp2_chart = temperature_chart(gui->tune_pid_scr->screen);
+  gui->temp2_curve = lv_chart_add_series(gui->temp2_chart, LV_COLOR_RED);
+  gui->setpoint2_curve = lv_chart_add_series(gui->temp2_chart, LV_COLOR_CYAN);
 
   gui->p_gain_sbox = pid_gain_sbox(gui->tune_pid_scr->screen, "P", 30, 200);
   lv_screen_add_object(gui->tune_pid_scr, gui->p_gain_sbox);
@@ -369,13 +472,13 @@ static void tune_pid_gui_create(lv_gui_t *gui) {
   gui->d_gain_sbox = pid_gain_sbox(gui->tune_pid_scr->screen, "D", 210, 200);
   lv_screen_add_object(gui->tune_pid_scr, gui->d_gain_sbox);
 
-  gui->home1_btn = lv_btn_create(gui->tune_pid_scr->screen, NULL);
-  lv_cont_set_fit(gui->home1_btn, true, true);
-  lv_obj_set_pos(gui->home1_btn, 270, 200);
-  lv_obj_t *home1_lbl = lv_label_create(gui->home1_btn, NULL);
-  lv_label_set_text(home1_lbl, SYMBOL_HOME);
-  lv_btn_set_action(gui->home1_btn, LV_BTN_ACTION_CLICK, button_clicked_cb);
-  lv_screen_add_object(gui->tune_pid_scr, gui->home1_btn);
+  gui->home2_btn = lv_btn_create(gui->tune_pid_scr->screen, NULL);
+  lv_cont_set_fit(gui->home2_btn, true, true);
+  lv_obj_set_pos(gui->home2_btn, 270, 200);
+  lv_obj_t *home2_lbl = lv_label_create(gui->home2_btn, NULL);
+  lv_label_set_text(home2_lbl, SYMBOL_HOME);
+  lv_btn_set_action(gui->home2_btn, LV_BTN_ACTION_CLICK, menu_btn_cb);
+  lv_screen_add_object(gui->tune_pid_scr, gui->home2_btn);
 }
 
 static lv_obj_t * max_temp_message() {
@@ -403,7 +506,7 @@ static void gui_update_task(void* arg) {
   lv_gui_t* gui = (lv_gui_t*) arg;
 
   TickType_t now_time = xTaskGetTickCount();
-  TickType_t start_time = now_time;
+//  TickType_t start_time = now_time;
 
   lv_spinbox_set_value(gui->setpoint_sbox, (int32_t) setpoint * 10);
   lv_spinbox_set_value(gui->p_gain_sbox, (int32_t) temp_pid.p_gain_ * 10);
@@ -417,36 +520,63 @@ static void gui_update_task(void* arg) {
     // Redraw GUI objects when there is an update from the event queue
     if(xQueueReceive(event_queue, &received_event, portMAX_DELAY) && update_gui) {
       now_time = xTaskGetTickCount();
+      if(STATE_OVEN_RUNNING == state) {
+        temp_profile_get_point(mg_4860p, ((now_time - start_time) * portTICK_RATE_MS) / 1000.0f, &setpoint);
+      }
+      else if(STATE_MENU == state || STATE_OVEN_STANDBY == state) {
+        setpoint =0.0f;
+      }
+
       if(TEMPERATURE_UPDATE == received_event.type) {
         const float temperature = received_event.value.float_val;
-
         if(temperature >= MAX_TEMPERATURE) {
           max_temp_message();
           setpoint = 0.0f;
           update_gui = false;
         }
 
-        temp_profile_get_point(mg_4860p, ((now_time - start_time) * portTICK_RATE_MS) / 1000.0f, &setpoint);
+        if(STATE_PID_TUNING == state) {
+          snprintf(tmp_buff, BUFFER_SIZE, "Temp. = %.01f C", temperature);
+          lv_label_set_text(gui->temp2_lbl, tmp_buff);
 
-        snprintf(tmp_buff, BUFFER_SIZE, "Temp. = %.01f C", temperature);
-        lv_label_set_text(gui->temp_lbl, tmp_buff);
+          lv_chart_set_next(gui->temp2_chart, gui->temp2_curve, (lv_coord_t) temperature);
+          lv_chart_set_next(gui->temp2_chart, gui->setpoint2_curve, (lv_coord_t) setpoint);
+          lv_chart_refresh(gui->temp2_chart);
+        }
 
-        lv_chart_set_next(gui->temp_chart, gui->temp_curve, (lv_coord_t) temperature);
-        lv_chart_set_next(gui->temp_chart, gui->setpoint_curve, (lv_coord_t) setpoint);
-        lv_chart_refresh(gui->temp_chart);
+        if(STATE_OVEN_STANDBY == state || STATE_OVEN_PAUSED == state || STATE_OVEN_RUNNING == state) {
+          snprintf(tmp_buff, BUFFER_SIZE, "%.01f C", temperature);
+          lv_label_set_text(gui->temp1_lbl, tmp_buff);
+
+          lv_chart_set_next(gui->temp1_chart, gui->temp1_curve, (lv_coord_t) temperature);
+          lv_chart_set_next(gui->temp1_chart, gui->setpoint1_curve, (lv_coord_t) setpoint);
+          lv_chart_refresh(gui->temp1_chart);
+        }
       }
       else if(DUTY_CYCLE_UPDATE == received_event.type) {
         const float command = received_event.value.float_val;
-        snprintf(tmp_buff, BUFFER_SIZE, "%.01f %%", command);
-        lv_label_set_text(gui->power_lbl, tmp_buff);
+        if(STATE_PID_TUNING == state) {
+          snprintf(tmp_buff, BUFFER_SIZE, "%.01f %%", command);
+          lv_label_set_text(gui->power_lbl, tmp_buff);
+        }
       }
       else if(HEATER_UPDATE == received_event.type) {
         const int32_t command = received_event.value.int_val;
-        if(command) {
-          lv_led_on(gui->heat_led);
+        if(STATE_PID_TUNING == state) {
+          if(command) {
+            lv_led_on(gui->heat2_led);
+          }
+          else {
+            lv_led_off(gui->heat2_led);
+          }
         }
-        else {
-          lv_led_off(gui->heat_led);
+        else if(STATE_OVEN_STANDBY == state || STATE_OVEN_PAUSED == state || STATE_OVEN_RUNNING == state) {
+          if(command) {
+            lv_led_on(gui->heat1_led);
+          }
+          else {
+            lv_led_off(gui->heat1_led);
+          }
         }
       }
     }
@@ -474,10 +604,13 @@ void app_main()
 
   main_menu_gui_create(&gui);
   select_profile_gui_create(&gui);
+  run_profile_gui_create(&gui);
   tune_pid_gui_create(&gui);
 
   // Show the initial screen
-  lv_screen_show(gui.main_menu_scr, NULL);
+  gui.current_scr = gui.run_profile_scr /*gui.main_menu_scr*/;
+  lv_screen_show(gui.current_scr, NULL);
+  current_profile = mg_4860p; // TODO: Remove this
 
   mg_4860p = temp_profile_create();
   temp_profile_add_point(mg_4860p, 0.0f, 25.0f);
