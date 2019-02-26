@@ -35,7 +35,6 @@
 #define I2C_MASTER_RX_BUF_DISABLE 0
 
 typedef struct {
-  lv_screen_t * current_scr;
   lv_screen_t * tune_pid_scr;
   lv_obj_t *setpoint_sbox;
   lv_obj_t *p_gain_sbox;
@@ -85,7 +84,7 @@ static float setpoint = 0.0f;
 static float current_temp = 0.0f;
 static lv_group_t * g;
 static lv_gui_t gui;
-static state_t state = STATE_OVEN_STANDBY;
+static state_t state = STATE_MENU;
 static TickType_t start_time;
 static TickType_t pause_time;
 
@@ -264,6 +263,8 @@ static lv_res_t menu_btn_cb(lv_obj_t *clicked_btn) {
   }
   else if(gui.tune_pid_btn == clicked_btn) {
     state = STATE_PID_TUNING;
+    lv_chart_clear_serie(gui.temp2_chart, gui.setpoint2_curve);
+    lv_chart_clear_serie(gui.temp2_chart, gui.temp2_curve);
     lv_screen_show(gui.tune_pid_scr, gui.main_menu_scr);
   }
   else if(gui.home2_btn == clicked_btn) {
@@ -277,6 +278,8 @@ static lv_res_t menu_btn_cb(lv_obj_t *clicked_btn) {
   else if(gui.mg_4860p_prof_btn == clicked_btn) {
     current_profile = mg_4860p;
     state = STATE_OVEN_STANDBY;
+    lv_chart_clear_serie(gui.temp1_chart, gui.setpoint1_curve);
+    lv_chart_clear_serie(gui.temp1_chart, gui.temp1_curve);
     lv_screen_show(gui.run_profile_scr, gui.select_profile_scr);
   }
   else if(gui.home1_btn == clicked_btn) {
@@ -296,6 +299,8 @@ static lv_res_t state_btn_cb(lv_obj_t *clicked_btn) {
     else if(STATE_OVEN_STANDBY == state) {
       state = STATE_OVEN_RUNNING;
       start_time = xTaskGetTickCount();
+      lv_chart_clear_serie(gui.temp1_chart, gui.setpoint1_curve);
+      lv_chart_clear_serie(gui.temp1_chart, gui.temp1_curve);
       lv_label_set_text(gui.play_lbl, SYMBOL_PAUSE);
     }
     else if(STATE_OVEN_PAUSED == state) {
@@ -414,7 +419,8 @@ static void run_profile_gui_create(lv_gui_t *gui) {
   lv_chart_set_series_opa(gui->temp1_chart, LV_OPA_70);                            /*Opacity of the data series*/
   lv_chart_set_series_width(gui->temp1_chart, 2);                                  /*Line width and point radious*/
   lv_chart_set_range(gui->temp1_chart, 0, 300);
-  lv_chart_set_point_count(gui->temp1_chart, 600);
+  lv_chart_set_point_count(gui->temp1_chart, 900/*600*/);
+  lv_chart_set_div_line_count(gui->temp1_chart, 2, 5);
 
   gui->temp1_curve = lv_chart_add_series(gui->temp1_chart, LV_COLOR_RED);
   gui->setpoint1_curve = lv_chart_add_series(gui->temp1_chart, LV_COLOR_CYAN);
@@ -513,6 +519,26 @@ static lv_obj_t * max_temp_message() {
   return mbox1;
 }
 
+static lv_res_t done_message_apply_action(lv_obj_t * btn, const char * txt) {
+  lv_obj_t * mbox = lv_mbox_get_from_btn(btn);
+  lv_group_remove_obj(mbox);
+  lv_group_set_editing(g, false);
+  lv_mbox_start_auto_close(mbox, 0);
+  return LV_RES_OK;
+}
+
+static lv_obj_t * done_message() {
+  lv_obj_t * mbox1 = lv_mbox_create(lv_scr_act(), NULL);
+  lv_mbox_set_text(mbox1, "Temperature profile finished!");
+  static const char * btns[] ={"\221OK", ""};
+  lv_mbox_add_btns(mbox1, btns, done_message_apply_action);
+  lv_obj_align(mbox1, NULL, LV_ALIGN_CENTER, 0, 0);
+  lv_group_add_obj(g, mbox1);
+  lv_group_focus_obj(mbox1);
+  lv_group_set_editing(g, true);
+  return mbox1;
+}
+
 static void gui_update_task(void* arg) {
   lv_gui_t* gui = (lv_gui_t*) arg;
 
@@ -536,7 +562,12 @@ static void gui_update_task(void* arg) {
       if(STATE_OVEN_RUNNING == state) {
         elapsed_time = ((now_time - start_time) * portTICK_RATE_MS) / 1000.0f;
 
-        temp_profile_get_point(mg_4860p, elapsed_time, &setpoint);
+        if(elapsed_time > total_time) {
+          done_message();
+          state_btn_cb(gui->stop_btn);
+        }
+
+        temp_profile_get_point(current_profile, elapsed_time, &setpoint);
       }
       else if(STATE_MENU == state || STATE_OVEN_STANDBY == state) {
         setpoint = 0.0f;
@@ -564,7 +595,7 @@ static void gui_update_task(void* arg) {
           snprintf(tmp_buff, BUFFER_SIZE, "%.01f C", temperature);
           lv_label_set_text(gui->temp1_lbl, tmp_buff);
 
-          total_time = mg_4860p->points[mg_4860p->points_len -1].time;
+          total_time = current_profile->points[current_profile->points_len -1].time;
 
           char et_buff[8], tt_buff[8];
           time_format(et_buff, elapsed_time);
@@ -632,9 +663,7 @@ void app_main()
   tune_pid_gui_create(&gui);
 
   // Show the initial screen
-  gui.current_scr = gui.run_profile_scr /*gui.main_menu_scr*/;
-  lv_screen_show(gui.current_scr, NULL);
-  current_profile = mg_4860p; // TODO: Remove this
+  lv_screen_show(gui.main_menu_scr, NULL);
 
   mg_4860p = temp_profile_create();
   temp_profile_add_point(mg_4860p, 0.0f, 25.0f);
