@@ -56,6 +56,7 @@ typedef struct {
   lv_obj_t * profile_lst;
   lv_obj_t * back_prof_btn;
   lv_obj_t * mg_4860p_prof_btn;
+  lv_obj_t * mg_4900p_prof_btn;
   lv_screen_t * run_profile_scr;
   lv_obj_t *temp1_lbl;
   lv_obj_t *time_lbl;
@@ -104,6 +105,7 @@ typedef struct {
 
 static temp_profile_t * current_profile;
 static temp_profile_t * mg_4860p;
+static temp_profile_t * mg_4900p;
 
 static void IRAM_ATTR lv_tick_task(void) {
   lv_tick_inc(portTICK_RATE_MS);
@@ -275,8 +277,13 @@ static lv_res_t menu_btn_cb(lv_obj_t *clicked_btn) {
     state = STATE_MENU;
     lv_screen_show(gui.main_menu_scr, gui.select_profile_scr);
   }
-  else if(gui.mg_4860p_prof_btn == clicked_btn) {
-    current_profile = mg_4860p;
+  else if(gui.mg_4860p_prof_btn == clicked_btn || gui.mg_4900p_prof_btn == clicked_btn) {
+    if(gui.mg_4860p_prof_btn == clicked_btn) {
+      current_profile = mg_4860p;
+    }
+    else if(gui.mg_4900p_prof_btn == clicked_btn) {
+      current_profile = mg_4900p;
+    }
     state = STATE_OVEN_STANDBY;
     lv_chart_clear_serie(gui.temp1_chart, gui.setpoint1_curve);
     lv_chart_clear_serie(gui.temp1_chart, gui.temp1_curve);
@@ -396,6 +403,7 @@ static void select_profile_gui_create(lv_gui_t *gui) {
   /*Add list elements*/
   gui->back_prof_btn = lv_list_add(gui->profile_lst, SYMBOL_LEFT, "Back...", menu_btn_cb);
   gui->mg_4860p_prof_btn = lv_list_add(gui->profile_lst, SYMBOL_CHARGE, "MG Chem. 4860P (Pb)", menu_btn_cb);
+  gui->mg_4900p_prof_btn = lv_list_add(gui->profile_lst, SYMBOL_CHARGE, "MG C. 4900P (Pb-Free)", menu_btn_cb);
 }
 
 static void run_profile_gui_create(lv_gui_t *gui) {
@@ -674,6 +682,17 @@ void app_main()
   temp_profile_add_point(mg_4860p, 300.0f, 215.0f);
   temp_profile_add_point(mg_4860p, 330.0f, 183.0f);
   temp_profile_add_point(mg_4860p, 360.0f, 140.0f);
+
+  mg_4900p = temp_profile_create();
+  temp_profile_add_point(mg_4900p, 0.0f, 25.0f);
+  temp_profile_add_point(mg_4900p, 90.0f, 125.0f);
+  temp_profile_add_point(mg_4900p, 150.0f, 150.0f);
+  temp_profile_add_point(mg_4900p, 210.0f, 160.0f);
+  temp_profile_add_point(mg_4900p, 240.0f, 200.0f);
+  temp_profile_add_point(mg_4900p, 260.0f, 217.0f);
+  temp_profile_add_point(mg_4900p, 285.0f, 240.0f);
+  temp_profile_add_point(mg_4900p, 330.0f, 200.0f);
+  temp_profile_add_point(mg_4900p, 360.0f, 140.0f);
 
   xTaskCreate(gui_update_task, "gui_update_task", 1024 * 2, (void *) &gui, 5, NULL);
   xTaskCreate(temperature_task, "temperature_task", 1024 * 2, NULL, 6, NULL);
