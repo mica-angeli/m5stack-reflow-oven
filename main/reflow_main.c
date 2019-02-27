@@ -10,6 +10,8 @@
 #include <drv/ili9341.h>
 #include <drv/m5stack_kpad.h>
 #include <esp_freertos_hooks.h>
+#include <nvs_flash.h>
+#include <nvs.h>
 #include <lv_style.h>
 #include "mcp9600.h"
 #include "pid.h"
@@ -88,6 +90,7 @@ static lv_gui_t gui;
 static state_t state = STATE_MENU;
 static TickType_t start_time;
 static TickType_t pause_time;
+static nvs_handle nvs_hndl;
 
 typedef enum {
   TEMPERATURE_UPDATE,
@@ -137,6 +140,63 @@ void gpio_setup() {
   };
   gpio_config(&heater_conf);
 }
+
+void load_pid_gains(nvs_handle hndl, pid* pid_obj) {
+  int32_t p_gain = 1600;
+  nvs_get_i32(hndl, "p_gain", &p_gain);
+
+  int32_t i_gain = 0;
+  nvs_get_i32(hndl, "i_gain", &i_gain);
+
+  int32_t d_gain = 9000;
+  nvs_get_i32(hndl, "d_gain", &d_gain);
+
+  int32_t i_clamp = 5000;
+  nvs_get_i32(hndl, "i_clamp", &i_clamp);
+
+  uint8_t antiwindup = false;
+  nvs_get_u8(hndl, "antiwindup", &antiwindup);
+
+  pid_set_gains(pid_obj, (float) p_gain / 100.0f, (float) i_gain / 100.0f, (float) d_gain / 100.0f, (float) -i_clamp / 100.0f, (float) i_clamp / 100.0f, antiwindup);
+}
+
+void save_pid_gains(nvs_handle hndl, pid* pid_obj) {
+  int32_t p_gain = (int32_t) (pid_obj->p_gain_ * 100.0f);
+  nvs_set_i32(hndl, "p_gain", p_gain);
+
+  int32_t i_gain = (int32_t) (pid_obj->i_gain_ * 100.0f);
+  nvs_set_i32(hndl, "i_gain", i_gain);
+
+  int32_t d_gain = (int32_t) (pid_obj->d_gain_ * 100.0f);
+  nvs_set_i32(hndl, "d_gain", d_gain);
+
+  int32_t i_clamp = (int32_t) (pid_obj->i_max_ * 100.0f);
+  nvs_set_i32(hndl, "i_clamp", i_clamp);
+
+  uint8_t antiwindup = (uint8_t) pid_obj->antiwindup_;
+  nvs_set_u8(hndl, "antiwindup", antiwindup);
+
+  nvs_commit(hndl);
+}
+
+void nvs_init() {
+  // Initialize NVS
+  esp_err_t err = nvs_flash_init();
+  if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    // NVS partition was truncated and needs to be erased
+    // Retry nvs_flash_init
+    ESP_ERROR_CHECK(nvs_flash_erase());
+    err = nvs_flash_init();
+  }
+  ESP_ERROR_CHECK( err );
+  err = nvs_open("storage", NVS_READWRITE, &nvs_hndl);
+  ESP_ERROR_CHECK( err );
+
+  // Get initial NVS values
+  load_pid_gains(nvs_hndl, &temp_pid);
+}
+
+
 
 void lvgl_setup() {
   lv_disp_drv_t disp;
@@ -271,6 +331,7 @@ static lv_res_t menu_btn_cb(lv_obj_t *clicked_btn) {
   }
   else if(gui.home2_btn == clicked_btn) {
     state = STATE_MENU;
+    save_pid_gains(nvs_hndl, &temp_pid);
     lv_screen_show(gui.main_menu_scr, gui.tune_pid_scr);
   }
   else if(gui.back_prof_btn == clicked_btn) {
@@ -649,10 +710,10 @@ static void gui_update_task(void* arg) {
 void app_main()
 {
   event_queue = xQueueCreate(16, sizeof(event_t));
-  pid_set_gains(&temp_pid, 16.0f, 0.0f, 90.0f, -50.0f, 50.0f, false);
 
   gpio_setup();
   i2c_setup();
+  nvs_init();
 
   lv_init();
 
