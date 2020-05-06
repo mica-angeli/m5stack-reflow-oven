@@ -2,3 +2,4 @@
 	path = components/lvgl
 	url = https://github.com/littlevgl/lvgl.git
 	branch = master
+	ignore = dirty
