@@ -6,6 +6,7 @@
 /*********************
  *      INCLUDES
  *********************/
+#include <driver/gpio.h>
 #include "ili9341.h"
 #include "disp_spi.h"
 #include "freertos/FreeRTOS.h"
