@@ -103,9 +103,12 @@ void ili9431_init(void)
 		cmd++;
 	}
 
-	///Enable backlight
+	// Enable backlight
 	printf("Enable backlight.\n");
 	gpio_set_level(ILI9341_BCKL, 1);
+
+	// Invert colors
+	ili9441_send_cmd(0x21);
 }
 
 void ili9431_fill(int32_t x1, int32_t y1, int32_t x2, int32_t y2, lv_color_t color)
